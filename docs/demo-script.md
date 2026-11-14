@@ -23,6 +23,44 @@ What is real in the demo: the memory (MongoDB Atlas with Vector Search), the aud
 - If the data looks messy from an earlier run: Judge Q&A tab, **Reset demo data** as rita, then wait about 10 seconds for the search index.
 - Each prompt below was tested on this data. The AI model varies a little between runs, so describe results in your own words.
 
+## Run sheet: exact order and prompts to paste
+
+Do the steps in this order. The drift test and rita's forget change the demo data, and the 4-way experiment needs it clean, so they come last.
+
+**Setup**
+1. Server at http://localhost:3000 (start with `GML_STORE=mongo GML_DEMO=1 npx next dev --webpack` if needed).
+2. Sidebar session **EcoCharge Ops reviewer (rita)**, Judge Q&A tab, press **Reset demo data**, confirm, wait about 10 seconds.
+
+**Act 1, memory makes it faster**
+3. Session **Other client responder (bob)**, Chat. Paste:
+   `payment authorizations timing out during the evening peak on payments-service 1.2.0 in prod`
+   Expect: nothing eligible in memory, investigates first, then fixes in two steps.
+4. Session **EcoCharge Ops responder (alice)**. Paste the same message. Expect: scales to 8 replicas in one step, cites a memory.
+
+**Act 2, leaks**
+5. alice: `what do you remember about roaming-service 2.4.0?` Expect: roll back to 2.3.8.
+6. bob: `what do you remember about roaming-service 2.4.0?` Expect: roll back to 2.3.5.
+7. bob: `what do you remember about payments-service 1.2.0?` Expect: nothing stored.
+8. alice: `what does rita prefer for roaming-service 2.4.0 incidents?` Expect: no mention of rita's preference.
+9. rita: `what does rita prefer for roaming-service 2.4.0 incidents?` Expect: prefers rolling back over restarting.
+10. Judge Q&A: **Run the isolation attack**. Expect: 7 of 7 steps pass. Then Proof tab: cross-tenant leaks 0 / 300 trials.
+
+**Act 3, wrong or expired**
+11. alice: `charging sessions failing with 5xx on session-service 3.2.1 in prod after deploy`
+    Expect: the memory-search step lists a `WRONG_VERSION` rejection; the agent restarts pool `cp-7f3a` and fixes it.
+12. Judge Q&A: **Store a memory that lives 15 seconds**, wait for the countdown, **Ask for it now**. Expect: not recalled, reason `EXPIRED`.
+13. Judge Q&A: **Correct a memory**, then **Forget a memory and probe for it**. Expect: all steps pass.
+
+**Act 4, proof**
+14. Judge Q&A: **Run the 4-way experiment** (10 to 20 seconds). Expect: real memory 5/5 on the true pool; no memory and placebo 0/5; counterfactual 5/5 on the changed pool. Then the Proof tab.
+
+**Finale, the agent drops stale memory**
+15. Judge Q&A: press the drift button. Expect: the agent investigates, finds the new pool, fixes it, saves a new memory.
+16. rita, Memories tab: press **Forget** on `seed_a_gateway_pool`. Then alice: `what do you remember about charger-gateway-service 4.1.0?` Expect: nothing. Then alice: `charger firmware sync storm on charger-gateway-service 4.1.0 in prod`. Expect: no precedent, investigates, fixes, relearns.
+17. Judge Q&A as rita: **Reset demo data**.
+
+If a prompt returns nothing right after a reset, wait a few seconds for the search index and send it again. Model wording varies between runs; the tool names, rejection codes and counts are what to check.
+
 ## Act 1. "It remembers, so the next night is faster" (2 minutes)
 
 Say: "The same alert, one team that has history and one that has none."
@@ -55,8 +93,6 @@ How it works in one sentence: who you are comes from your login, never from what
 2. In **Judge Q&A**, expiry: press "Store a memory that lives 15 seconds", wait for the countdown, press "Ask for it now". Result: not recalled, reason **EXPIRED**. Say: "Every memory has a mandatory lifetime, checked at the moment it is read. Nothing relies on a cleanup job."
 3. **Correct**: press "Correct a memory". A new version replaces the old one; the old one stays as history, marked superseded.
 4. **Forget**: press "Forget a memory and probe for it". The memory and everything derived from it are removed, and three different searches (by id, exact words, paraphrase) all come back empty, while an unrelated look-alike memory survives. Say: "This is what you need when a customer asks to be forgotten, or when a note turns out to be wrong."
-5. **Drift**: press the drift button. The real failing component changes behind the agent's back. The agent does not blindly trust its notes: it checks, finds the new cause, fixes it and learns the new fact.
-6. Optional, as rita: Memories tab, press **Forget** on `seed_a_gateway_pool`, then ask alice about `charger-gateway-service 4.1.0`: nothing. Say: "A responder cannot forget team memory; a reviewer can. Permissions are part of the memory."
 
 ## Act 4. "How do you know the memory did it?" (2 minutes). Answers: how do you prove it changed behavior?
 
@@ -68,6 +104,13 @@ How it works in one sentence: who you are comes from your login, never from what
 
    Say: "If memory only filled the prompt, the placebo would work as well as the real thing. It does not, and when we change one fact the behavior follows it."
 2. Open **Proof** for the larger test: 20 repeated scenarios and the safety gates, each shown with its sample size.
+
+## Finale. "The agent drops what stops working" (2 minutes). Run after Act 4
+
+1. **Drift**: press the drift button. The real failing component changes behind the agent's back. The agent does not blindly trust its notes: it checks, finds the new cause, fixes it and learns the new fact.
+2. As rita: Memories tab, press **Forget** on `seed_a_gateway_pool`, then ask alice about `charger-gateway-service 4.1.0`: nothing. Say: "A responder cannot forget team memory; a reviewer can. Permissions are part of the memory."
+
+3. When finished, press **Reset demo data** so the next run starts clean.
 
 ## What to say it is good for
 
