@@ -31,6 +31,11 @@ export interface ApiResponse {
   json: unknown;
 }
 
+// Live Q&A experiments (Mongo demo only). They run as fixed demo principals; the request carries nothing but an action and an id.
+export interface JudgeApi {
+  run(action: string, input: { id?: string }, principal: Principal): Promise<unknown>;
+}
+
 export interface ApiContext {
   resolver: PrincipalResolver;
   layer: MemoryLayer;
@@ -44,4 +49,5 @@ export interface ApiContext {
   demoMode: boolean; // clock controls exist only in demo mode
   manual?: { get(): boolean; set(on: boolean): void }; // manual controls switch; off means the agent runs alone
   agentStatus?(): unknown;
+  judge?: JudgeApi;
 }

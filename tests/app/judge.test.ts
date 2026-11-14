@@ -15,6 +15,7 @@ async function env(over: Partial<JudgeEnv> = {}, layerWrap?: (l: MemoryLayer) =>
     brain: ruleBrain,
     nonce: "n1",
     now: () => w.clock.nowMs(),
+    wait: async () => undefined,
     query: { text: a.text, service: a.service, version: a.version, environment: a.environment },
     ...over,
   };

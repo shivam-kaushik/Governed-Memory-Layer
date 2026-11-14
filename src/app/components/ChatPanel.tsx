@@ -11,7 +11,7 @@ interface Turn {
   forgotten?: string[];
   cards?: { memoryId: string; version: number; statement: string; confidence: number; sourceAuthority: number; score: number }[];
 }
-interface Reply {
+export interface Reply {
   brain: string;
   fixed: boolean;
   turns: Turn[];
@@ -23,7 +23,43 @@ interface Msg {
   error?: boolean;
 }
 
-const EXAMPLES = ["5xx spike on checkout-service 2.3.1 in prod after deploy", "5xx spike on payments-service 1.4.0 in prod after deploy"];
+export function AgentReply({ reply }: { reply: Reply }) {
+  return (
+    <>
+                <span> {reply.fixed ? "Incident fixed." : "Not fixed, escalate."} (brain: {reply.brain})</span>
+                <ol className="turns">
+                  {reply.turns.map((t) => (
+                    <li key={t.traceId}>
+                      <div className="step"><span className="steplabel">1 · Memory recalled</span>
+                        {t.cards && t.cards.length > 0 ? (
+                          t.cards.map((c) => (
+                            <div key={c.memoryId} className="evidence">
+                              {c.statement}
+                              <div><small className="mono">{c.memoryId} v{c.version}</small> <small>· confidence {c.confidence} · authority {c.sourceAuthority} · match {c.score.toFixed(2)}</small></div>
+                            </div>
+                          ))
+                        ) : <em> nothing eligible: no precedent, expired, wrong version or out of scope</em>}
+                      </div>
+                      <div className="step"><span className="steplabel">2 · Action chosen</span>
+                        <strong>{t.action.tool}</strong> <span className="mono">{JSON.stringify(t.action.args)}</span>
+                        {t.action.usedMemoryIds.length > 0 ? <div><small>used memory: <span className="mono">{t.action.usedMemoryIds.join(", ")}</span></small></div> : <div><small>used memory: none</small></div>}
+                        {t.explanation && <div><em>{t.explanation}</em></div>}
+                      </div>
+                      <div className="step"><span className="steplabel">3 · Tool result</span>
+                        {t.result.rejected ? <span className="bad">BLOCKED by guard: {t.result.rejected}</span> : t.result.fixed ? <span className="ok">incident fixed</span> : <span>executed, not fixed yet</span>}
+                        {t.result.findings && <div>Finding: {t.result.findings}</div>}
+                        {t.learnedId && <div>Saved to memory: <span className="mono">{t.learnedId}</span></div>}
+                        {t.forgotten && t.forgotten.length > 0 && <div>Forgot proven-wrong memory: <span className="mono">{t.forgotten.join(", ")}</span></div>}
+                      </div>
+                      <small>trace <span className="mono">{t.traceId}</span> (see the Monitor tab)</small>
+                    </li>
+                  ))}
+                </ol>
+    </>
+  );
+}
+
+const EXAMPLES = ["charging sessions failing with 5xx on session-service 3.2.1 in prod after deploy", "charging sessions failing with 5xx on roaming-service 1.4.0 in prod after deploy"];
 
 // Type an incident; the agent recalls governed memory, acts, and the cards/tables around this panel update live.
 export function ChatPanel() {
@@ -61,44 +97,12 @@ export function ChatPanel() {
         {msgs.map((m, i) => (
           <div key={i} style={{ margin: ".5rem 0" }}>
             <strong>{m.from === "you" ? "Alert from you:" : "Agent:"}</strong> {m.text && <span className={m.error ? "err" : ""}>{m.text}</span>}
-            {m.reply && (
-              <>
-                <span> {m.reply.fixed ? "Incident fixed." : "Not fixed, escalate."} (brain: {m.reply.brain})</span>
-                <ol className="turns">
-                  {m.reply.turns.map((t) => (
-                    <li key={t.traceId}>
-                      <div className="step"><span className="steplabel">1 · Memory recalled</span>
-                        {t.cards && t.cards.length > 0 ? (
-                          t.cards.map((c) => (
-                            <div key={c.memoryId} className="evidence">
-                              {c.statement}
-                              <div><small className="mono">{c.memoryId} v{c.version}</small> <small>· confidence {c.confidence} · authority {c.sourceAuthority} · match {c.score.toFixed(2)}</small></div>
-                            </div>
-                          ))
-                        ) : <em> nothing eligible: no precedent, expired, wrong version or out of scope</em>}
-                      </div>
-                      <div className="step"><span className="steplabel">2 · Action chosen</span>
-                        <strong>{t.action.tool}</strong> <span className="mono">{JSON.stringify(t.action.args)}</span>
-                        {t.action.usedMemoryIds.length > 0 ? <div><small>used memory: <span className="mono">{t.action.usedMemoryIds.join(", ")}</span></small></div> : <div><small>used memory: none</small></div>}
-                        {t.explanation && <div><em>{t.explanation}</em></div>}
-                      </div>
-                      <div className="step"><span className="steplabel">3 · Tool result</span>
-                        {t.result.rejected ? <span className="bad">BLOCKED by guard: {t.result.rejected}</span> : t.result.fixed ? <span className="ok">incident fixed</span> : <span>executed, not fixed yet</span>}
-                        {t.result.findings && <div>Finding: {t.result.findings}</div>}
-                        {t.learnedId && <div>Saved to memory: <span className="mono">{t.learnedId}</span></div>}
-                        {t.forgotten && t.forgotten.length > 0 && <div>Forgot proven-wrong memory: <span className="mono">{t.forgotten.join(", ")}</span></div>}
-                      </div>
-                      <small>trace <span className="mono">{t.traceId}</span> (see the Monitor tab)</small>
-                    </li>
-                  ))}
-                </ol>
-              </>
-            )}
+            {m.reply && <AgentReply reply={m.reply} />}
           </div>
         ))}
       </div>
       <form onSubmit={(e) => { e.preventDefault(); void send(text); }} style={{ display: "flex", gap: ".4rem", marginTop: ".5rem" }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="5xx spike on checkout-service 2.3.1 in prod" style={{ flex: 1, padding: ".4rem" }} maxLength={1000} />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="charging sessions failing with 5xx on session-service 3.2.1 in prod" style={{ flex: 1, padding: ".4rem" }} maxLength={1000} />
         <button type="submit" disabled={busy || !text.trim()}>{busy ? "Agent working..." : "Send"}</button>
       </form>
     </section>

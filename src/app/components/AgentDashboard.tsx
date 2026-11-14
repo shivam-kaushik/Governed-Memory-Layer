@@ -4,6 +4,7 @@ import type { AuditEvent } from "../../contracts/contracts";
 import type { ProofReport } from "../../eval/run";
 import { AuditTable, RejectionBreakdown } from "./AuditTable";
 import { ChatPanel } from "./ChatPanel";
+import { JudgePanel } from "./JudgePanel";
 import { LivePanel } from "./LivePanel";
 import { MemoriesTable, StatusSummary, type MemoryRow } from "./MemoriesTable";
 import { MemoryActions } from "./MemoryActions";
@@ -35,6 +36,7 @@ type Session = { token: string; label: string };
 type Alert = { id: string } & Record<string, unknown>;
 
 const TABS = [
+  ["judge", "Judge Q&A", "The three hackathon questions, each with a live check against the real database."],
   ["live", "Live demo", "Report an incident and watch the agent use memory."],
   ["memories", "Memories", "Everything the agent knows, with its state and trust. Correct or forget here."],
   ["audit", "Audit", "Every memory request: who asked, what was allowed, and why candidates were rejected. Ids only, never memory text."],
@@ -70,7 +72,7 @@ function usePoll<T>(path: string, ms: number, active: boolean): T | null {
 }
 
 export function AgentDashboard({ alert, demo, sessions }: { alert?: Alert; demo: boolean; sessions: Session[] }) {
-  const [tab, setTab] = useState<Tab>("live");
+  const [tab, setTab] = useState<Tab>("judge");
   const [err, setErr] = useState("");
   const [clockMsg, setClockMsg] = useState("");
   const status = usePoll<Status>("/api/agent/status", 2000, true);
@@ -88,7 +90,10 @@ export function AgentDashboard({ alert, demo, sessions }: { alert?: Alert; demo:
   };
 
   const a = status?.agent;
-  const who = sessions.find((s) => s.token === cookie())?.label;
+  // Cookie is client-only: read after mount so SSR and first client render match.
+  const [token, setToken] = useState("");
+  useEffect(() => setToken(cookie()), []);
+  const who = sessions.find((s) => s.token === token)?.label;
   const flip = async (manual: boolean) => {
     const r = await fetch("/api/agent/mode", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ manual }) });
     setErr(r.ok ? "" : `Switching mode needs a reviewer session (${String(((await r.json()) as { error?: string }).error)})`);
@@ -115,6 +120,8 @@ export function AgentDashboard({ alert, demo, sessions }: { alert?: Alert; demo:
         ))}
       </div>
       <p className="help">{help}</p>
+
+      {tab === "judge" && <JudgePanel />}
 
       {tab === "live" && (
         <>

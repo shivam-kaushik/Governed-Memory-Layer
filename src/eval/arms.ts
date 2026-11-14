@@ -15,7 +15,7 @@ const FILLER = [
   "pagination", "breadcrumb", "favicon", "changelog", "glossary", "survey", "webinar", "roadmap", "billing", "wiki",
 ];
 
-function placebo(real: EvidenceCard, seed: number): EvidenceCard {
+export function placebo(real: EvidenceCard, seed: number): EvidenceCard {
   const need = countTokens(real.statement); // match the statement length exactly, so the whole block matches
   const start = seed % FILLER.length;
   const statement = Array.from({ length: need }, (_, i) => FILLER[(start + i) % FILLER.length]).join(" ");

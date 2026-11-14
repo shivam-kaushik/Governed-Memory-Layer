@@ -15,11 +15,11 @@ export const SEED_PRINCIPALS: Principal[] = [
 interface SeedSpec { id: string; tenantId: string; scopeId: string; claimKey: string; text: string; value: Record<string, unknown>; service: string; versionRange: string; createdBy: string }
 
 const SEEDS: SeedSpec[] = [
-  { id: "seed_a_team_fix", tenantId: "tenantA", scopeId: "team:tenantA", claimKey: "checkout-service/5xx/cache", text: "5xx spike after deploy on checkout-service: restart cache pool cp-7f3a", value: { action: "restart_cache_pool", pool: "cp-7f3a" }, service: "checkout-service", versionRange: ">=2.0.0", createdBy: "alice" },
+  { id: "seed_a_team_fix", tenantId: "tenantA", scopeId: "team:tenantA", claimKey: "session-service/5xx/cache", text: "charging sessions fail with 5xx after deploy on session-service: restart cache pool cp-7f3a", value: { action: "restart_cache_pool", pool: "cp-7f3a" }, service: "session-service", versionRange: ">=2.0.0", createdBy: "alice" },
   // Deliberately near-identical symptom text, different service: must survive forgetting the memory above.
-  { id: "seed_a_similar_other_service", tenantId: "tenantA", scopeId: "team:tenantA", claimKey: "search-service/5xx/cache", text: "5xx spike after deploy on search-service: restart cache pool cp-1b9d", value: { action: "restart_cache_pool", pool: "cp-1b9d" }, service: "search-service", versionRange: ">=2.0.0", createdBy: "alice" },
-  { id: "seed_a_private_note", tenantId: "tenantA", scopeId: "private:alice", claimKey: "alice/pref/escalation", text: "alice prefers to escalate checkout incidents to oncall-sre first", value: { escalate: "oncall-sre" }, service: "checkout-service", versionRange: "*", createdBy: "alice" },
-  { id: "seed_b_team_fix", tenantId: "tenantB", scopeId: "team:tenantB", claimKey: "checkout-service/5xx/cache", text: "5xx spike after deploy on checkout-service: restart cache pool cp-9e41", value: { action: "restart_cache_pool", pool: "cp-9e41" }, service: "checkout-service", versionRange: ">=2.0.0", createdBy: "bob" },
+  { id: "seed_a_similar_other_service", tenantId: "tenantA", scopeId: "team:tenantA", claimKey: "billing-service/5xx/cache", text: "charging sessions fail with 5xx after deploy on billing-service: restart cache pool cp-1b9d", value: { action: "restart_cache_pool", pool: "cp-1b9d" }, service: "billing-service", versionRange: ">=2.0.0", createdBy: "alice" },
+  { id: "seed_a_private_note", tenantId: "tenantA", scopeId: "private:alice", claimKey: "alice/pref/escalation", text: "alice prefers to escalate session incidents to the charger-ops oncall first", value: { escalate: "charger-ops" }, service: "session-service", versionRange: "*", createdBy: "alice" },
+  { id: "seed_b_team_fix", tenantId: "tenantB", scopeId: "team:tenantB", claimKey: "session-service/5xx/cache", text: "charging sessions fail with 5xx after deploy on session-service: restart cache pool cp-9e41", value: { action: "restart_cache_pool", pool: "cp-9e41" }, service: "session-service", versionRange: ">=2.0.0", createdBy: "bob" },
 ];
 export const SEED_MEMORY_IDS = SEEDS.map((s) => s.id);
 

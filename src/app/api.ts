@@ -24,6 +24,8 @@ const correctBody = z.object({
 });
 const forgetBody = z.object({ id, reason });
 const chatBody = z.object({ message: z.string().min(1).max(1000) });
+const judgeBody = z.object({ id: id.optional() });
+const JUDGE_ACTIONS = "isolation|expiry-start|expiry-check|correct|forget|behavior|drift|reset";
 const runBody = z.object({ alertId: z.string().min(1).max(128) });
 const sinceQuery = z.coerce.number().int().min(0);
 const MONITOR_WINDOW_MS = 3_600_000;
@@ -181,6 +183,16 @@ const ROUTES: Route[] = [
         if (!b.success) return res(400, { error: "INVALID_INPUT" });
         const alert = c.alerts.find((a) => a.id === b.data.alertId);
         return alert ? res(200, await c.runLive(p, caller.sessionToken, alert)) : res(404, { error: "NOT_FOUND" });
+      },
+    },
+  },
+  {
+    re: new RegExp(`^\\/api\\/judge\\/(${JUDGE_ACTIONS})$`),
+    methods: {
+      POST: async (c, p, _caller, req, action) => {
+        if (!c.judge) return res(404, { error: "NOT_FOUND" });
+        const b = judgeBody.safeParse(req.body ?? {});
+        return b.success ? res(200, await c.judge.run(action, b.data, p)) : res(400, { error: "INVALID_INPUT" });
       },
     },
   },
