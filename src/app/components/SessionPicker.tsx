@@ -13,6 +13,7 @@ export function SessionPicker({ sessions }: { sessions: { token: string; label: 
     <label>
       Session:{" "}
       <select
+        suppressHydrationWarning // browser extensions inject attributes (e.g. data-sharkid) before React hydrates
         value={token}
         onChange={(e) => {
           document.cookie = `session=${e.target.value}; path=/; SameSite=Strict`;
