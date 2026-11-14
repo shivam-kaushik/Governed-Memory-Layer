@@ -1,5 +1,7 @@
 import type { Db, Collection } from "mongodb";
-import type { Memory, MemoryRepo, Principal } from "../contracts/contracts.js";
+import { randomUUID } from "node:crypto";
+import type { Clock, Memory, MemoryRepo, Principal } from "../contracts/contracts.js";
+import { systemClock } from "./system-clock.js";
 import { VECTOR_INDEX_NAME } from "./vector-index.js";
 
 // Grace period between expiry and the TTL cleanup index removing the doc.
@@ -39,12 +41,13 @@ export function buildVectorSearchPipeline(
 }
 
 export class MongoMemoryRepo implements MemoryRepo {
-  constructor(protected readonly db: Db) {}
+  constructor(protected readonly db: Db, protected readonly clock: Clock = systemClock) {}
 
   protected get memories(): Collection<any> { return this.db.collection("memories"); }
   protected get tombstones(): Collection<any> { return this.db.collection("tombstones"); }
 
   async insert(p: Principal, doc: Memory): Promise<void> {
+    if (await this.isTombstoned(p, doc._id, doc.contentHash)) throw new Error("TOMBSTONED: id or content was forgotten");
     await this.memories.insertOne({ ...doc, tenantId: p.tenantId, purgeAt: new Date(doc.expiresAtMs + PURGE_GRACE_MS) });
   }
 
@@ -89,9 +92,70 @@ export class MongoMemoryRepo implements MemoryRepo {
     return rows.map((r) => ({ id: r._id as string, score: r.score as number }));
   }
 
-  // ---- A4 ----
-  supersede(): Promise<void> { throw new Error("A4: not implemented"); }
-  tombstoneAndPurge(): Promise<{ tombstoneIds: string[] }> { throw new Error("A4: not implemented"); }
-  expireDue(): Promise<string[]> { throw new Error("A4: not implemented"); }
-  replayTombstones(): Promise<number> { throw new Error("A4: not implemented"); }
+  // ---- A4: lifecycle persistence ----
+
+  // Old doc -> superseded and new doc inserted in ONE transaction (all or nothing).
+  async supersede(p: Principal, oldId: string, newDoc: Memory): Promise<void> {
+    const session = this.db.client.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const res = await this.memories.updateOne(
+          { _id: oldId, tenantId: p.tenantId, status: { $in: ["active", "disputed"] } },
+          { $set: { status: "superseded" } },
+          { session },
+        );
+        if (res.matchedCount !== 1) throw new Error("SUPERSEDE_TARGET_NOT_FOUND");
+        await this.memories.insertOne(
+          { ...newDoc, tenantId: p.tenantId, supersedes: oldId, purgeAt: new Date(newDoc.expiresAtMs + PURGE_GRACE_MS) },
+          { session },
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  // Tombstone (id + content hash only) first, then delete content and embedding, in ONE transaction.
+  async tombstoneAndPurge(p: Principal, ids: string[], reason: string): Promise<{ tombstoneIds: string[] }> {
+    const tombstoneIds: string[] = [];
+    const session = this.db.client.startSession();
+    try {
+      await session.withTransaction(async () => {
+        tombstoneIds.length = 0;
+        for (const id of ids) {
+          const doc = await this.memories.findOne({ _id: id, tenantId: p.tenantId }, { session, projection: { contentHash: 1 } });
+          const tombId = `tomb_${randomUUID()}`;
+          await this.tombstones.insertOne({
+            _id: tombId, tenantId: p.tenantId, targetId: id, contentHash: doc?.contentHash,
+            requestedBy: p.id, reason, createdAtMs: this.clock.nowMs(),
+            closure: { derivedIds: ids.filter((x) => x !== id), status: "verified" },
+          }, { session });
+          await this.memories.deleteOne({ _id: id, tenantId: p.tenantId }, { session });
+          tombstoneIds.push(tombId);
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+    return { tombstoneIds };
+  }
+
+  // Cleanup/status flip only; the read-time gate (expiresAtMs) never depends on this running.
+  async expireDue(nowMs: number): Promise<string[]> {
+    const due = await this.memories.find({ status: "active", expiresAtMs: { $lte: nowMs } }, { projection: { _id: 1 } }).toArray();
+    const ids = due.map((d) => d._id as string);
+    if (ids.length) await this.memories.updateMany({ _id: { $in: ids }, status: "active" }, { $set: { status: "expired" } });
+    return ids;
+  }
+
+  // After any restore/import: re-delete anything a tombstone says must stay gone (G14).
+  async replayTombstones(): Promise<number> {
+    let removed = 0;
+    for await (const t of this.tombstones.find({})) {
+      const or: object[] = [{ _id: t.targetId }];
+      if (t.contentHash) or.push({ contentHash: t.contentHash });
+      removed += (await this.memories.deleteMany({ tenantId: t.tenantId, $or: or })).deletedCount;
+    }
+    return removed;
+  }
 }
