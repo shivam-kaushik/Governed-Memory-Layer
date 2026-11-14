@@ -1,5 +1,6 @@
 import type { Db, Collection } from "mongodb";
 import type { Memory, MemoryRepo, Principal } from "../contracts/contracts.js";
+import { VECTOR_INDEX_NAME } from "./vector-index.js";
 
 // Grace period between expiry and the TTL cleanup index removing the doc.
 export const PURGE_GRACE_MS = 7 * 24 * 3600 * 1000;
@@ -9,14 +10,39 @@ export function derivedQuery(p: Principal, id: string) {
   return { filter: { tenantId: p.tenantId, derivedFrom: id }, hint: "derivedFrom_1" };
 }
 
-export class MongoMemoryRepo implements MemoryRepo {
-  protected readonly memories: Collection<any>;
-  protected readonly tombstones: Collection<any>;
+export const NUM_CANDIDATES = 200;
 
-  constructor(protected readonly db: Db) {
-    this.memories = db.collection("memories");
-    this.tombstones = db.collection("tombstones");
-  }
+// Trusted prefilter (plan 4.4): built only from the Principal and server-resolved scopes/time.
+// Anything else on `q` (e.g. a forged tenantId) is never read.
+export function buildVectorSearchPipeline(
+  p: Principal,
+  q: { vector: number[]; scopeIds: string[]; nowMs: number; limit: number },
+  exact = false,
+): object[] {
+  const search: Record<string, unknown> = {
+    index: VECTOR_INDEX_NAME,
+    path: "embedding",
+    queryVector: q.vector,
+    limit: q.limit,
+    filter: {
+      $and: [
+        { tenantId: { $eq: p.tenantId } },
+        { scopeId: { $in: q.scopeIds } },
+        { status: { $eq: "active" } },
+        { validFromMs: { $lte: q.nowMs } },
+        { expiresAtMs: { $gt: q.nowMs } },
+      ],
+    },
+  };
+  if (exact) search.exact = true; else search.numCandidates = NUM_CANDIDATES;
+  return [{ $vectorSearch: search }, { $project: { _id: 1, score: { $meta: "vectorSearchScore" } } }];
+}
+
+export class MongoMemoryRepo implements MemoryRepo {
+  constructor(protected readonly db: Db) {}
+
+  protected get memories(): Collection<any> { return this.db.collection("memories"); }
+  protected get tombstones(): Collection<any> { return this.db.collection("tombstones"); }
 
   async insert(p: Principal, doc: Memory): Promise<void> {
     await this.memories.insertOne({ ...doc, tenantId: p.tenantId, purgeAt: new Date(doc.expiresAtMs + PURGE_GRACE_MS) });
@@ -52,8 +78,18 @@ export class MongoMemoryRepo implements MemoryRepo {
     return (await this.tombstones.countDocuments({ tenantId: p.tenantId, $or: or }, { limit: 1 })) > 0;
   }
 
-  // ---- A3 / A4 ----
-  vectorSearch(): Promise<Array<{ id: string; score: number }>> { throw new Error("A3: not implemented"); }
+  // Candidate list only: the index is eventually consistent, so callers MUST recheck via byIds (plan 3.2).
+  async vectorSearch(
+    p: Principal,
+    q: { vector: number[]; scopeIds: string[]; nowMs: number; limit: number },
+    opts: { exact?: boolean } = {},
+  ): Promise<Array<{ id: string; score: number }>> {
+    if (q.scopeIds.length === 0) return [];
+    const rows = await this.memories.aggregate(buildVectorSearchPipeline(p, q, opts.exact)).toArray();
+    return rows.map((r) => ({ id: r._id as string, score: r.score as number }));
+  }
+
+  // ---- A4 ----
   supersede(): Promise<void> { throw new Error("A4: not implemented"); }
   tombstoneAndPurge(): Promise<{ tombstoneIds: string[] }> { throw new Error("A4: not implemented"); }
   expireDue(): Promise<string[]> { throw new Error("A4: not implemented"); }
