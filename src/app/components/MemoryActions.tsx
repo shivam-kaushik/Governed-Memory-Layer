@@ -10,7 +10,10 @@ export function MemoryActions({ id }: { id: string }) {
     if (r.ok) {
       setErr("");
       router.refresh();
-    } else setErr(String(((await r.json()) as { error?: string }).error ?? r.status));
+    } else {
+      const e = String(((await r.json()) as { error?: string }).error ?? r.status);
+      setErr(e === "MANUAL_DISABLED" ? "Turn on Manual controls in the Live demo tab first." : e === "OP_DENIED" || e === "SCOPE_DENIED" ? "Your role is not allowed to do this." : e);
+    }
   };
   return (
     <>

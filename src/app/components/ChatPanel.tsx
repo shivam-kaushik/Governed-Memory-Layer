@@ -9,6 +9,7 @@ interface Turn {
   explanation?: string;
   learnedId?: string;
   forgotten?: string[];
+  cards?: { memoryId: string; version: number; statement: string; confidence: number; sourceAuthority: number; score: number }[];
 }
 interface Reply {
   brain: string;
@@ -48,7 +49,7 @@ export function ChatPanel() {
 
   return (
     <section>
-      <h2>Chat with the agent</h2>
+      <h3>Report an incident</h3>
       <p>
         Describe an incident. Examples:{" "}
         {EXAMPLES.map((e) => (
@@ -59,22 +60,35 @@ export function ChatPanel() {
         {msgs.length === 0 && <em>No messages yet.</em>}
         {msgs.map((m, i) => (
           <div key={i} style={{ margin: ".5rem 0" }}>
-            <strong>{m.from === "you" ? "You" : "Agent"}:</strong> {m.text && <span className={m.error ? "err" : ""}>{m.text}</span>}
+            <strong>{m.from === "you" ? "Alert from you:" : "Agent:"}</strong> {m.text && <span className={m.error ? "err" : ""}>{m.text}</span>}
             {m.reply && (
               <>
                 <span> {m.reply.fixed ? "Incident fixed." : "Not fixed, escalate."} (brain: {m.reply.brain})</span>
-                <ol>
+                <ol className="turns">
                   {m.reply.turns.map((t) => (
                     <li key={t.traceId}>
-                      <strong>{t.action.tool}</strong> {JSON.stringify(t.action.args)}
-                      {t.action.usedMemoryIds.length > 0 && <> · used memory {t.action.usedMemoryIds.join(", ")}</>}
-                      {t.result.rejected && <span className="err"> · BLOCKED {t.result.rejected}</span>}
-                      {t.result.fixed && <> · fixed</>}
-                      {t.learnedId && <> · learned {t.learnedId}</>}
-                      {t.forgotten && t.forgotten.length > 0 && <> · forgot {t.forgotten.join(", ")}</>}
-                      {t.explanation && <div><em>{t.explanation}</em></div>}
-                      {t.result.findings && <div>Finding: {t.result.findings}</div>}
-                      <div>trace <a href="/monitor">{t.traceId}</a></div>
+                      <div className="step"><span className="steplabel">1 · Memory recalled</span>
+                        {t.cards && t.cards.length > 0 ? (
+                          t.cards.map((c) => (
+                            <div key={c.memoryId} className="evidence">
+                              {c.statement}
+                              <div><small className="mono">{c.memoryId} v{c.version}</small> <small>· confidence {c.confidence} · authority {c.sourceAuthority} · match {c.score.toFixed(2)}</small></div>
+                            </div>
+                          ))
+                        ) : <em> nothing eligible: no precedent, expired, wrong version or out of scope</em>}
+                      </div>
+                      <div className="step"><span className="steplabel">2 · Action chosen</span>
+                        <strong>{t.action.tool}</strong> <span className="mono">{JSON.stringify(t.action.args)}</span>
+                        {t.action.usedMemoryIds.length > 0 ? <div><small>used memory: <span className="mono">{t.action.usedMemoryIds.join(", ")}</span></small></div> : <div><small>used memory: none</small></div>}
+                        {t.explanation && <div><em>{t.explanation}</em></div>}
+                      </div>
+                      <div className="step"><span className="steplabel">3 · Tool result</span>
+                        {t.result.rejected ? <span className="bad">BLOCKED by guard: {t.result.rejected}</span> : t.result.fixed ? <span className="ok">incident fixed</span> : <span>executed, not fixed yet</span>}
+                        {t.result.findings && <div>Finding: {t.result.findings}</div>}
+                        {t.learnedId && <div>Saved to memory: <span className="mono">{t.learnedId}</span></div>}
+                        {t.forgotten && t.forgotten.length > 0 && <div>Forgot proven-wrong memory: <span className="mono">{t.forgotten.join(", ")}</span></div>}
+                      </div>
+                      <small>trace <span className="mono">{t.traceId}</span> (see the Monitor tab)</small>
                     </li>
                   ))}
                 </ol>

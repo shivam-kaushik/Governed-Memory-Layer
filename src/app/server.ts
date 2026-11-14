@@ -90,7 +90,7 @@ export async function buildDemoServer(
     proofReport: () => (proof ??= runProof(PROOF_SEEDS, ruleBrain, { brainName: "rule-brain" })),
     demoMode,
     manual: { get: () => manual, set: (on) => void (manual = on) },
-    agentStatus: () => ({ ...autonomy.status(), brain: brainName, notifierConfigured: notifier.configured, actingAs: w.scenario.actor.id }),
+    agentStatus: () => ({ ...autonomy.status(), nowMs: w.clock.nowMs(), clockControllable: !!w.clock.advanceMs, store: "memory (fakes)", brain: brainName, notifierConfigured: notifier.configured, actingAs: w.scenario.actor.id }),
   };
   const sessions = demoMode ? Object.entries(LABELS).map(([token, label]) => ({ token, label })) : [];
   return { handle: createApi(ctx), sessions, demoMode, stop: () => autonomy.stop() };

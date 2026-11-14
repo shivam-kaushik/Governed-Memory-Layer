@@ -86,8 +86,8 @@ export async function buildMongoServer(env: Record<string, string | undefined>, 
     },
     proofReport: () => runProof([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], ruleBrain, { brainName: "rule-brain" }),
     demoMode: true,
-    manual: { get: () => false, set: () => undefined },
-    agentStatus: () => ({ ...s, brain: brainName, store: "mongo", notifierConfigured: false, actingAs: "session" }),
+    manual: { get: () => true, set: () => undefined }, // no background loop here: human actions (correct, forget) are always on; policy still decides
+    agentStatus: () => ({ ...s, brain: brainName, store: "MongoDB Atlas", nowMs: systemClock.nowMs(), clockControllable: false, notifierConfigured: false, actingAs: "session" }),
   };
   const labels = { "tok-a-resp": "Team A responder (alice)", "tok-a-rev": "Team A reviewer (rita)", "tok-b-resp": "Team B responder (bob)" };
   return { handle: createApi(ctx), sessions: Object.entries(labels).map(([token, label]) => ({ token, label })), demoMode: true, stop: () => undefined };
