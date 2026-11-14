@@ -73,6 +73,11 @@ export class MongoMemoryRepo implements MemoryRepo {
     return { tenantId: p.tenantId, scopeId: { $in: p.scopes }, status: { $ne: "deleted" } };
   }
 
+  /** Dashboard read: tenant-injected, limited to the given scopes, newest first. */
+  async listMemories(p: Principal, scopeIds: string[]): Promise<Memory[]> {
+    return (await this.memories.find({ tenantId: p.tenantId, scopeId: { $in: scopeIds } }).sort({ createdAtMs: -1 }).toArray()) as unknown as Memory[];
+  }
+
   async getById(p: Principal, id: string): Promise<Memory | null> {
     assertPrincipal(p); assertString(id, "id");
     return (await this.memories.findOne({ _id: id, ...this.readable(p) })) as Memory | null;

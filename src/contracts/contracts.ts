@@ -151,7 +151,8 @@ export interface AuditStore { record(e: AuditEvent): Promise<void> }
 export interface TraceStore {
   emit(e: TraceEvent): Promise<void>; // append-only
   listByTrace(p: Principal, traceId: string): Promise<TraceEvent[]>;
-  feed(p: Principal, sinceMs: number): AsyncIterable<TraceEvent>;
+  // idleMs: end after the backlog drains and nothing new arrives for that long (snapshot read). limit: cap the backlog read. Omitted: live feed.
+  feed(p: Principal, sinceMs: number, o?: { idleMs?: number; limit?: number }): AsyncIterable<TraceEvent>;
   metrics(p: Principal, windowMs: number): Promise<MonitorMetrics>;
   alerts(p: Principal, sinceMs: number): Promise<MonitorAlert[]>;
 }
@@ -165,9 +166,34 @@ export interface Action {
   args: Record<string, string | number>;
   usedMemoryIds: string[];
 }
-export interface Alert { service: string; version: string; environment: string; symptom: string; text: string }
+export interface Alert { id: string; service: string; version: string; environment: string; symptom: string; text: string }
 export interface Brain { decide(alert: Alert, cards: EvidenceCard[]): Promise<Action> }
 
 // Constants shared by both sides.
 export const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 export const EMBEDDING_DIMS = 384;
+
+// ---------- Person B additive types (joint edit; A types unchanged) ----------
+export type ReasonCode =
+  | "EXPIRED"
+  | "WRONG_VERSION"
+  | "WRONG_SERVICE"
+  | "WRONG_ENVIRONMENT"
+  | "OTHER_SCOPE"
+  | "QUARANTINED"
+  | "TOMBSTONED"
+  | "STALE_INDEX"
+  | "NO_ELIGIBLE"
+  | "UNKNOWN_PRINCIPAL"
+  | "PURPOSE_DENIED"
+  | "SCOPE_DENIED"
+  | "OP_DENIED"
+  | "INVALID_INPUT"
+  | "TTL_INVALID"
+  | "INJECTION_SUSPECTED"
+  | "DUPLICATE"
+  | "CONFLICT";
+export type MemoryOp = AuditEvent["op"];
+export type ProofArm = EvalRun["arm"];
+export type ToolName = Action["tool"];
+export interface RecallQuery { text: string; service: string; version: string; environment: string; limit?: number }

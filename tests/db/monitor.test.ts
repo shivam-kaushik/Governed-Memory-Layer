@@ -90,6 +90,20 @@ describe("A5 audit + traces", () => {
     expect((await started).value.traceId).toBe("live2");
     await it.return?.();
   });
+  it("feed_with_idleMs_drains_backlog_then_ends", async () => {
+    await traces.emit(ev({ traceId: "b1" }));
+    const got: string[] = [];
+    const done = (async () => { for await (const e of traces.feed(principalA, 0, { idleMs: 300 })) got.push(e.traceId); })();
+    await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error("feed did not end")), 3000))]);
+    expect(got).toEqual(["b1"]);
+  });
+  it("feed_with_idleMs_zero_is_a_pure_snapshot", async () => {
+    await traces.emit(ev({ traceId: "s1" }));
+    const got: string[] = [];
+    const done = (async () => { for await (const e of traces.feed(principalA, 0, { idleMs: 0 })) got.push(e.traceId); })();
+    await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error("feed did not end")), 3000))]);
+    expect(got).toEqual(["s1"]);
+  });
   it("feed_never_delivers_other_tenant_events", async () => {
     const polling = new MongoTraceStore(t.db, { nowMs: () => NOW }, { forcePolling: true });
     await polling.emit(ev({ tenantId: "tenantB", traceId: "foreign" }));

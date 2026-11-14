@@ -8,18 +8,30 @@
     "bootstrap": "tsx scripts/bootstrap.ts",
     "doctor": "tsx scripts/doctor.ts",
     "seed": "tsx scripts/seed.ts",
-    "reset": "tsx scripts/reset.ts"
+    "reset": "tsx scripts/reset.ts",
+    "typecheck": "tsc --noEmit",
+    "dev": "GML_DEMO=1 GML_WORLD=no_precedent next dev",
+    "build": "next build"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
     "@xenova/transformers": "^2.17.2",
     "dotenv": "^18.0.10",
     "mongodb": "^7.9.0",
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "semver": "^7.8.6",
+    "three": "^0.187.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/semver": "^7.8.0",
+    "@types/three": "^0.187.0",
     "mongodb-memory-server": "^11.3.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

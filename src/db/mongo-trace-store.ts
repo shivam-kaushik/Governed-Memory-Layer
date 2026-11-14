@@ -37,8 +37,8 @@ export class MongoTraceStore implements TraceStore {
     return rows.map(toTraceEvent);
   }
 
-  feed(p: Principal, sinceMs: number): AsyncIterable<TraceEvent> {
-    return traceFeed(this.db, p.tenantId, sinceMs, { forcePolling: this.opts.forcePolling });
+  feed(p: Principal, sinceMs: number, o: { idleMs?: number; limit?: number } = {}): AsyncIterable<TraceEvent> {
+    return traceFeed(this.db, p.tenantId, sinceMs, { forcePolling: this.opts.forcePolling, ...(o.idleMs !== undefined ? { idleMs: o.idleMs } : {}), ...(o.limit ? { limit: o.limit } : {}) });
   }
 
   metrics(p: Principal, windowMs: number): Promise<MonitorMetrics> {
