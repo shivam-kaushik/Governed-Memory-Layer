@@ -21,6 +21,11 @@ export class FakeMemoryRepo implements MemoryRepo {
     return [...this.docs.values()].filter((d) => d.tenantId === p.tenantId);
   }
 
+  /** Dashboard read: tenant-injected, limited to the given scopes. */
+  async listMemories(p: Principal, scopeIds: string[]): Promise<Memory[]> {
+    return this.tenantDocs(p).filter((d) => scopeIds.includes(d.scopeId)).map(copy);
+  }
+
   /** Test hook: vector index is stale, so it ignores status/validity filters. */
   setIndexLag(on: boolean): void {
     this.lag = on;
