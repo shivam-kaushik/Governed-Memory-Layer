@@ -14,6 +14,7 @@ async function env(over: Partial<JudgeEnv> = {}, layerWrap?: (l: MemoryLayer) =>
     tokens: { eco: "tok-a-resp", ecoReviewer: "tok-a-rev", other: "tok-b-resp" },
     brain: ruleBrain,
     nonce: "n1",
+    now: () => w.clock.nowMs(),
     query: { text: a.text, service: a.service, version: a.version, environment: a.environment },
     ...over,
   };
