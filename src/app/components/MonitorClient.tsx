@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { MonitorAlert, MonitorMetrics, TraceEvent } from "../../contracts/contracts";
+import { pushHistory } from "../kpi-model";
 import { MonitorView } from "./MonitorView";
 
 // Polls the monitor API once a second; a new run shows up within ~1s. Identity is the session cookie.
@@ -8,6 +9,7 @@ export function MonitorClient(init: { events: TraceEvent[]; metrics: MonitorMetr
   const [events, setEvents] = useState(init.events);
   const [metrics, setMetrics] = useState(init.metrics);
   const [alerts, setAlerts] = useState(init.alerts);
+  const [history, setHistory] = useState<number[][]>(() => (init.metrics ? pushHistory([], init.metrics) : []));
   const since = useRef(Math.max(0, ...init.events.map((e) => e.createdAtMs)));
 
   useEffect(() => {
@@ -26,7 +28,10 @@ export function MonitorClient(init: { events: TraceEvent[]; metrics: MonitorMetr
             return fresh.length ? [...old, ...fresh] : old;
           });
         }
-        if (m) setMetrics(m.metrics);
+        if (m) {
+          setMetrics(m.metrics);
+          setHistory((h) => pushHistory(h, m.metrics));
+        }
         if (a) setAlerts(a.alerts);
       } catch {
         // network blip: keep showing the last data
@@ -39,5 +44,5 @@ export function MonitorClient(init: { events: TraceEvent[]; metrics: MonitorMetr
     };
   }, []);
 
-  return <MonitorView events={events} metrics={metrics} alerts={alerts} />;
+  return <MonitorView events={events} metrics={metrics} alerts={alerts} history={history} />;
 }

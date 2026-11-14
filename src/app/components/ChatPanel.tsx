@@ -1,6 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { readSession, SESSION_EVENT } from "./session-cookie";
+import { MemoryCloud, type MemoryOp } from "./MemoryCloud";
+import { MnemoCanvas } from "./three";
+import { emitMood, moodForOp, replyOp } from "../mood";
 
 type Json = Record<string, unknown>;
 export interface Step {
@@ -10,6 +13,7 @@ export interface Step {
   tone: "ok" | "warn" | "bad" | "info";
   ids?: string[];
   rejected?: { id: string; reason: string }[];
+  op?: MemoryOp;
 }
 interface Turn {
   action: { tool: string; args: Json; usedMemoryIds: string[] };
@@ -46,7 +50,7 @@ function Timeline({ steps, base }: { steps: Step[]; base: number }) {
   return (
     <ol className="tl">
       {steps.map((st, i) => (
-        <li key={st.kind} className={`tl-step tone-${st.tone}`} style={{ animationDelay: `${(base + i) * 0.45}s` }}>
+        <li key={st.kind} className={`tl-step tone-${st.tone}`} style={{ animationDelay: `${(base + i) * 0.45}s`, "--sd": `${(base + i) * 0.45}s` } as React.CSSProperties}>
           <span className="dot" aria-hidden />
           <div>
             <strong>{st.title}</strong> <span className="tl-detail">{st.detail}</span>
@@ -60,6 +64,7 @@ function Timeline({ steps, base }: { steps: Step[]; base: number }) {
                 {st.rejected.map((r) => <span key={r.id} className="pill pill-rej" title={r.id}>{r.reason} {short(r.id)}</span>)}
               </div>
             )}
+            {st.op && <MemoryCloud op={st.op} />}
           </div>
         </li>
       ))}
@@ -195,6 +200,7 @@ export function ChatPanel() {
     // Recent conversation, so the agent can follow up ("that didn't work") and know when memory applies.
     const history = (chats.find((c) => c.id === id)?.msgs ?? []).slice(-8).map((m) => ({ from: m.from, text: (m.text ?? m.reply?.text ?? m.reply?.turns?.at(-1)?.explanation ?? "").slice(0, 500) })).filter((h) => h.text);
     setBusy(true);
+    emitMood("thinking");
     add(id, { from: "you", text: message });
     setText("");
     try {
@@ -202,8 +208,10 @@ export function ChatPanel() {
       const j = (await r.json()) as Json;
       const fail = r.status === 401 ? "Pick a session in the sidebar first." : `Error: ${String(j["error"])}`;
       add(id, r.ok ? { from: "agent", reply: j as unknown as Reply } : { from: "agent", text: fail, error: true });
+      emitMood(r.ok ? moodForOp(replyOp(j as unknown as Reply)) : "idle");
     } catch {
       add(id, { from: "agent", text: "Request failed.", error: true });
+      emitMood("idle");
     }
     setBusy(false);
   };
@@ -221,6 +229,7 @@ export function ChatPanel() {
       </div>
       {msgs.length === 0 ? (
         <div className="hero">
+          <MnemoCanvas size="hero" />
           <h1>Ask an agent that remembers, within limits.</h1>
           <p>Every memory it recalls is scoped, versioned, expiring and audited. Describe an incident, or just chat: it decides when memory applies.</p>
           <div className="chips">

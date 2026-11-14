@@ -1,15 +1,16 @@
 import type { MonitorAlert, MonitorMetrics, TraceEvent } from "../../contracts/contracts";
 import { explainStep, groupRuns } from "../monitor-view";
-
-const pct = (n: number) => `${Math.round(n * 100)}%`;
+import { kpisFromMetrics } from "../kpi-model";
+import { KpiPanel } from "./KpiPanel";
 
 // Pure render of runs, metrics and alerts. React escapes every string (G17).
-export function MonitorView({ events, metrics, alerts }: { events: TraceEvent[]; metrics: MonitorMetrics | null; alerts: MonitorAlert[] }) {
+export function MonitorView({ events, metrics, alerts, history = [] }: { events: TraceEvent[]; metrics: MonitorMetrics | null; alerts: MonitorAlert[]; history?: number[][] }) {
   const runs = groupRuns(events);
   return (
     <section>
+      <KpiPanel kpis={kpisFromMetrics(metrics, history)} caption="Column height is the current value; floating points are the last samples, one per second." />
       {alerts.length > 0 && (
-        <div role="alert" style={{ background: "#fdecea", border: "1px solid #b00020", padding: ".6rem", marginBottom: "1rem" }}>
+        <div role="alert" className="alert">
           <strong>{alerts.length} guard alert(s)</strong>
           <ul>
             {alerts.map((a, i) => (
@@ -20,29 +21,14 @@ export function MonitorView({ events, metrics, alerts }: { events: TraceEvent[];
           </ul>
         </div>
       )}
-      {metrics && (
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-          {[
-            ["Recalls", String(metrics.recalls)],
-            ["Denies", `${metrics.denies} (${pct(metrics.denyRate)})`],
-            ["Abstain rate", pct(metrics.abstainRate)],
-            ["Actions", Object.entries(metrics.actionsByType).map(([k, v]) => `${k}: ${v}`).join(", ") || "none"],
-          ].map(([k, v]) => (
-            <div key={k} style={{ border: "1px solid #ddd", padding: ".5rem .8rem", minWidth: 120 }}>
-              <div style={{ fontSize: 12, color: "#666" }}>{k}</div>
-              <div style={{ fontSize: 18 }}>{v}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      <h2>Runs</h2>
-      {runs.length === 0 && <p>No runs yet. Run triage on the Live page.</p>}
+      <h3 className="sect">Runs</h3>
+      {runs.length === 0 && <p className="help">No runs yet. Ask the agent something in Chat and the run appears here.</p>}
       {runs.map((r) => (
-        <details key={r.traceId} open={r === runs[0]}>
+        <details key={r.traceId} className="run" open={r === runs[0]}>
           <summary>
             {r.traceId} — {r.outcome ?? "running"}
           </summary>
-          <ol>
+          <ol className="run-steps">
             {r.events.map((e) => (
               <li key={e._id}>
                 <code>{e.step}</code> {explainStep(e)}

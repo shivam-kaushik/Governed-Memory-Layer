@@ -7,6 +7,7 @@ export interface Step {
   tone: "ok" | "warn" | "bad" | "info";
   ids?: string[];
   rejected?: { id: string; reason: string }[];
+  op?: "saved" | "updated" | "deleted"; // memory change this step made; drives the chat cloud
 }
 
 const p = (events: TraceEvent[], step: string) => events.find((e) => e.step === step)?.payload ?? {};
@@ -25,6 +26,9 @@ export function buildSteps(events: TraceEvent[], rejected: { id: string; reason:
   const reasons = strs(v.reasons);
   const guessed = [inferred?.service ? "service" : "", inferred?.version ? "version" : ""].filter(Boolean);
   const forgot = strs(m.forgotten);
+  const wrote = typeof m.memoryId === "string";
+  // active = brand-new memory; disputed/duplicate = an existing claim was touched, so it reads as an update.
+  const op: Step["op"] = forgot.length ? "deleted" : wrote ? (m.status === "active" ? "saved" : m.status === "quarantined" ? undefined : "updated") : undefined;
 
   return [
     { kind: "understood", title: "Read your message", tone: "info", detail: `service ${String(a.service)}, version ${String(a.version)}, env ${String(a.environment)}${guessed.length ? ` (${guessed.join(" and ")} not stated: carried over or unknown)` : ""}` },
@@ -34,6 +38,7 @@ export function buildSteps(events: TraceEvent[], rejected: { id: string; reason:
     { kind: "tool", title: "Ran the tool", tone: t.tool ? (t.fixed ? "ok" : "warn") : "bad", detail: t.tool ? `${String(t.tool)}: ${t.fixed ? "incident fixed" : "not fixed yet"}` : "not executed" },
     {
       kind: "memory",
+      ...(op ? { op } : {}),
       title: "Updated memory",
       tone: forgot.length ? "warn" : typeof m.memoryId === "string" ? "ok" : "info",
       ids: forgot.length ? forgot : typeof m.memoryId === "string" ? [m.memoryId] : [],

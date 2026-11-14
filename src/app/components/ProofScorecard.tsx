@@ -1,4 +1,6 @@
 import type { ProofReport } from "../../eval/run";
+import { kpisFromProof } from "../kpi-model";
+import { KpiPanel } from "./KpiPanel";
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 const ARM_NAMES = { R: "Real memory", O: "No memory", P: "Placebo memory", C: "Counterfactual" } as const;
@@ -39,6 +41,7 @@ export function ProofScorecard({ report }: { report: ProofReport }) {
       </div>
 
       <h3>Does memory change behavior? (per arm)</h3>
+      <KpiPanel kpis={kpisFromProof(report.arms)} caption="Column height is the success rate; the two points are the 95% interval." />
       <table>
         <thead><tr><th>Arm</th><th>Successes</th><th>Rate</th><th>95% interval</th><th>Target</th><th /></tr></thead>
         <tbody>
