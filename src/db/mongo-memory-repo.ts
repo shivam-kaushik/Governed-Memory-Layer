@@ -46,6 +46,16 @@ export function buildVectorSearchPipeline(
   return [{ $vectorSearch: search }, { $project: { _id: 1, score: { $meta: "vectorSearchScore" } } }];
 }
 
+// Fail closed on a missing/malformed principal and on non-string values (a `{ $ne: null }` object would
+// otherwise be interpreted by Mongo as a query operator).
+function assertPrincipal(p: Principal): void {
+  if (!p || typeof p.tenantId !== "string" || p.tenantId === "" || !Array.isArray(p.scopes)) throw new Error("invalid principal: fail closed");
+}
+function assertString(v: unknown, what: string): asserts v is string {
+  if (typeof v !== "string") throw new Error(`${what} must be a string`);
+}
+function assertStrings(vs: unknown[], what: string): void { vs.forEach((v) => assertString(v, what)); }
+
 export class MongoMemoryRepo implements MemoryRepo {
   constructor(protected readonly db: Db, protected readonly clock: Clock = systemClock) {}
 
@@ -57,31 +67,44 @@ export class MongoMemoryRepo implements MemoryRepo {
     await this.memories.insertOne({ ...doc, tenantId: p.tenantId, purgeAt: purgeAtFor(doc.expiresAtMs) });
   }
 
+  // Reads see only this tenant, only the principal's own scopes, and never a doc already marked deleted
+  // (the authoritative recheck after a possibly stale vector index, G5).
+  private readable(p: Principal) {
+    return { tenantId: p.tenantId, scopeId: { $in: p.scopes }, status: { $ne: "deleted" } };
+  }
+
   async getById(p: Principal, id: string): Promise<Memory | null> {
-    return (await this.memories.findOne({ _id: id, tenantId: p.tenantId })) as Memory | null;
+    assertPrincipal(p); assertString(id, "id");
+    return (await this.memories.findOne({ _id: id, ...this.readable(p) })) as Memory | null;
   }
 
   async byIds(p: Principal, ids: string[]): Promise<Memory[]> {
+    assertPrincipal(p); assertStrings(ids, "id");
     if (ids.length === 0) return [];
-    return (await this.memories.find({ _id: { $in: ids }, tenantId: p.tenantId }).toArray()) as Memory[];
+    return (await this.memories.find({ _id: { $in: ids }, ...this.readable(p) }).toArray()) as Memory[];
   }
 
   async findActiveByClaimKey(p: Principal, scopeIds: string[], claimKey: string): Promise<Memory[]> {
-    if (scopeIds.length === 0) return [];
-    return (await this.memories.find({ tenantId: p.tenantId, scopeId: { $in: scopeIds }, claimKey, status: "active" }).toArray()) as Memory[];
+    assertPrincipal(p); assertStrings(scopeIds, "scopeId"); assertString(claimKey, "claimKey");
+    const allowed = scopeIds.filter((s) => p.scopes.includes(s));
+    if (allowed.length === 0) return [];
+    return (await this.memories.find({ tenantId: p.tenantId, scopeId: { $in: allowed }, claimKey, status: "active" }).toArray()) as Memory[];
   }
 
   async setStatus(p: Principal, id: string, status: Memory["status"]): Promise<void> {
+    assertPrincipal(p); assertString(id, "id");
     await this.memories.updateOne({ _id: id, tenantId: p.tenantId }, { $set: { status } });
   }
 
   async findDerived(p: Principal, id: string): Promise<string[]> {
+    assertPrincipal(p); assertString(id, "id");
     const { filter, hint } = derivedQuery(p, id);
     const rows = await this.memories.find(filter, { projection: { _id: 1 } }).hint(hint).toArray();
     return rows.map((r) => r._id as string);
   }
 
   async isTombstoned(p: Principal, id: string, contentHash?: string): Promise<boolean> {
+    assertPrincipal(p); assertString(id, "id"); if (contentHash !== undefined) assertString(contentHash, "contentHash");
     const or: object[] = [{ targetId: id }];
     if (contentHash) or.push({ contentHash });
     return (await this.tombstones.countDocuments({ tenantId: p.tenantId, $or: or }, { limit: 1 })) > 0;
@@ -93,8 +116,10 @@ export class MongoMemoryRepo implements MemoryRepo {
     q: { vector: number[]; scopeIds: string[]; nowMs: number; limit: number },
     opts: { exact?: boolean } = {},
   ): Promise<Array<{ id: string; score: number }>> {
-    if (q.scopeIds.length === 0) return [];
-    const rows = await this.memories.aggregate(buildVectorSearchPipeline(p, q, opts.exact)).toArray();
+    assertPrincipal(p); assertStrings(q.scopeIds, "scopeId");
+    const scopeIds = q.scopeIds.filter((s) => p.scopes.includes(s)); // requested scopes limited to the principal's own
+    if (scopeIds.length === 0) return [];
+    const rows = await this.memories.aggregate(buildVectorSearchPipeline(p, { ...q, scopeIds }, opts.exact)).toArray();
     return rows.map((r) => ({ id: r._id as string, score: r.score as number }));
   }
 
@@ -102,6 +127,7 @@ export class MongoMemoryRepo implements MemoryRepo {
 
   // Old doc -> superseded and new doc inserted in ONE transaction (all or nothing).
   async supersede(p: Principal, oldId: string, newDoc: Memory): Promise<void> {
+    assertPrincipal(p); assertString(oldId, "id");
     const session = this.db.client.startSession();
     try {
       await session.withTransaction(async () => {
@@ -123,6 +149,7 @@ export class MongoMemoryRepo implements MemoryRepo {
 
   // Tombstone (id + content hash only) first, then delete content and embedding, in ONE transaction.
   async tombstoneAndPurge(p: Principal, ids: string[], reason: string): Promise<{ tombstoneIds: string[] }> {
+    assertPrincipal(p); assertStrings(ids, "id");
     const tombstoneIds: string[] = [];
     const session = this.db.client.startSession();
     try {
