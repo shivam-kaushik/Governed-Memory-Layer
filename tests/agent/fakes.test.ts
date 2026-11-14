@@ -98,6 +98,11 @@ describe("FakeMemoryRepo", () => {
     expect(await repo.getById(pB, "m1")).toBeNull();
   });
 
+  it("insert_allows_same_claimKey_version_in_different_scopes", async () => {
+    await repo.insert(pA, await mem({ _id: "m1", claimKey: "k", scopeId: "private:pA" }));
+    await expect(repo.insert(pA, await mem({ _id: "m2", claimKey: "k", scopeId: "team:tA" }))).resolves.toBeUndefined();
+  });
+
   it("insert_rejects_duplicate_tenant_claimKey_version", async () => {
     await repo.insert(pA, await mem({ _id: "m1", claimKey: "k" }));
     await expect(repo.insert(pA, await mem({ _id: "m2", claimKey: "k" }))).rejects.toThrow();
