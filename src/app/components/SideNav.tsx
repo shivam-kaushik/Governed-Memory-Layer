@@ -9,6 +9,7 @@ const LINKS = [
   ["/memories", "Memories"],
   ["/audit", "Audit"],
   ["/proof", "Proofs"],
+  ["/judge", "Judge Q&A"],
 ] as const;
 
 export function SideNav({ children }: { children: ReactNode }) {
