@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev": "GML_DEMO=1 next dev",
+    "build": "next build"
   },
   "dependencies": {
     "next": "^16.4.6",

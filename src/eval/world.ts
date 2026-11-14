@@ -41,5 +41,5 @@ export async function buildWorld(kind: ScenarioKind, seed: number) {
   const simulator = makeSimulator(scenario.nonce);
   const run = (brain: AgentBrain) =>
     runTriage(scenario.alert, caller("tok-a-resp"), layer, brain, trace, deps.clock, { principal: scenario.actor, simulator, newId });
-  return { scenario, layer, run };
+  return { scenario, layer, run, repo, audit: deps.audit as FakeAuditStore, trace, clock: deps.clock, deps, simulator };
 }

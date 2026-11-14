@@ -35,8 +35,8 @@ describe("views", () => {
   });
 
   it("audit_table_shows_op_decision_and_reason_codes_only", () => {
-    const ev = { _id: "a1", tenantId: "t", actorId: "u1", op: "recall", decision: "allow", purpose: "incident-triage", scopeIds: ["team-a"],
-      selectedIds: ["m1"], rejected: [{ id: "m2", reason: "EXPIRED" }], createdAtMs: 1, policyVersion: "v1" };
+    const ev = { _id: "a1", traceId: "tr1", tenantId: "t", actorId: "u1", op: "recall", decision: "allow", purpose: "incident-triage",
+      reasonCodes: [], selectedIds: ["m1"], rejectedIds: [{ id: "m2", reason: "EXPIRED" }], queryHash: "h", createdAtMs: 1 };
     const html = renderToStaticMarkup(h(AuditTable, { events: [ev] as never }));
     expect(html).toContain("recall");
     expect(html).toContain("EXPIRED");
@@ -44,7 +44,7 @@ describe("views", () => {
   });
 
   it("proof_scorecard_names_brain_counts_and_limits", () => {
-    const arm = (s: number) => ({ n: 20, success: s, rate: s / 20, ci: [0.8, 1] });
+    const arm = (s: number) => ({ n: 20, success: s, rate: s / 20, ci: [0.8, 1] as [number, number] });
     const report = { brain: "rule-brain", seeds: 20, arms: { R: arm(20), O: arm(0), P: arm(0), C: arm(20) },
       uplift: { rMinusP: 1, lower: 0.8, upper: 1 }, targetedResponse: 1, collateralStability: 1, harmfulAdoption: 0, harmfulTrials: 80 };
     const html = renderToStaticMarkup(h(ProofScorecard, { report }));
