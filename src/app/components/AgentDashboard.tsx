@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ChatPanel } from "./ChatPanel";
 import { LivePanel } from "./LivePanel";
 import { MemoryActions } from "./MemoryActions";
 import { MemoriesTable, type MemoryRow } from "./MemoriesTable";
@@ -28,7 +29,7 @@ interface Status {
 
 // Autonomous by default: the agent triages, learns, forgets stale memory and alerts by SMS on its own.
 // The manual switch (reviewer/admin) pauses it and turns the human controls on.
-export function AgentDashboard({ alert, demo }: { alert: { id: string } & Record<string, unknown>; demo: boolean }) {
+export function AgentDashboard({ alert, demo }: { alert?: { id: string } & Record<string, unknown>; demo: boolean }) {
   const [st, setSt] = useState<Status | null>(null);
   const [mems, setMems] = useState<MemoryRow[]>([]);
   const [err, setErr] = useState("");
@@ -101,7 +102,8 @@ export function AgentDashboard({ alert, demo }: { alert: { id: string } & Record
           )}
         </>
       )}
-      {st?.manual && <LivePanel alert={alert} demo={demo} />}
+      <ChatPanel />
+      {st?.manual && alert && <LivePanel alert={alert} demo={demo} />}
       <h2>Memory (agent-managed)</h2>
       <MemoriesTable memories={mems} {...(st?.manual ? { actions: (m: MemoryRow) => <MemoryActions id={m.id} /> } : {})} />
       <h2>What the agent is doing</h2>

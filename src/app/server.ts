@@ -32,6 +32,7 @@ export async function buildDemoServer(
   env: Record<string, string | undefined> = process.env,
   opts: { fetch?: typeof fetch; autoStart?: boolean } = {},
 ): Promise<DemoServer> {
+  if (env["GML_STORE"] === "mongo") return (await import("./mongo-server")).buildMongoServer(env, opts);
   const demoMode = env["GML_DEMO"] === "1";
   // GML_WORLD=no_precedent starts with empty memory so the agent has to learn.
   const kind = SCENARIO_KINDS.find((k) => k === env["GML_WORLD"]) ?? ("valid_fix" as ScenarioKind);
