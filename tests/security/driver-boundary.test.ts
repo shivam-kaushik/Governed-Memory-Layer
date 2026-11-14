@@ -1,38 +1,39 @@
+import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { describe, expect, it } from "vitest";
 
-const ROOT = join(__dirname, "..", "..");
+const ROOT = process.cwd();
 
 function walk(dir: string): string[] {
   let out: string[] = [];
-  try {
-    for (const name of readdirSync(dir)) {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) out = out.concat(walk(p));
-      else if (/\.(ts|tsx)$/.test(name)) out.push(p);
-    }
-  } catch {
-    // directory absent
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out = out.concat(walk(p));
+    else if (/\.(ts|tsx)$/.test(name)) out.push(p);
   }
   return out;
 }
+const rel = (p: string) => relative(ROOT, p).split(sep).join("/");
+const files = ["src", "scripts"].flatMap((d) => {
+  try { return walk(join(ROOT, d)); } catch { return []; }
+});
 
-const files = [...walk(join(ROOT, "src")), ...walk(join(ROOT, "scripts"))].map((f) => ({
-  rel: relative(ROOT, f).split(sep).join("/"),
-  text: readFileSync(f, "utf8"),
-}));
-
-describe("driver boundary", () => {
-  it("only src/db and scripts import mongodb", () => {
-    const bad = files.filter(
-      (f) => /from\s+["']mongodb["']|require\(["']mongodb["']\)/.test(f.text) && !/^(src\/db|scripts)\//.test(f.rel),
-    );
-    expect(bad.map((f) => f.rel)).toEqual([]);
+describe("driver boundary (G3, G18, G21)", () => {
+  it("only src/db and scripts import the mongodb driver", () => {
+    const offenders = files.filter((f) => {
+      const r = rel(f);
+      if (r.startsWith("src/db/") || r.startsWith("scripts/")) return false;
+      return /from\s+["']mongodb["']|require\(["']mongodb["']\)/.test(readFileSync(f, "utf8"));
+    });
+    expect(offenders.map(rel)).toEqual([]);
   });
 
   it("only clock implementations call Date.now(", () => {
-    const bad = files.filter((f) => f.text.includes("Date.now(") && !/clock[^/]*\.ts$/i.test(f.rel));
-    expect(bad.map((f) => f.rel)).toEqual([]);
+    const offenders = files.filter((f) => {
+      const r = rel(f);
+      if (/(^|\/)[^/]*clock[^/]*\.ts$/i.test(r)) return false;
+      return /Date\.now\(/.test(readFileSync(f, "utf8"));
+    });
+    expect(offenders.map(rel)).toEqual([]);
   });
 });
