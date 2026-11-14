@@ -42,4 +42,6 @@ export interface ApiContext {
   runLive(principal: Principal, sessionToken: string, alert: Alert): Promise<LiveRunResult>;
   proofReport(): Promise<unknown>;
   demoMode: boolean; // clock controls exist only in demo mode
+  manual?: { get(): boolean; set(on: boolean): void }; // manual controls switch; off means the agent runs alone
+  agentStatus?(): unknown;
 }

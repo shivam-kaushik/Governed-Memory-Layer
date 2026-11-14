@@ -17,7 +17,7 @@ export async function runEpisode(
   trace: TraceStore,
   clock: Clock,
   ctx: TriageContext,
-  maxTurns = 3,
+  maxTurns = 4,
 ): Promise<EpisodeOutcome> {
   const turns: TriageOutcome[] = [];
   const notes = [...(ctx.notes ?? [])];
@@ -25,7 +25,9 @@ export async function runEpisode(
     const o = await runTriage(alert, caller, layer, brain, trace, clock, { ...ctx, notes: [...notes] });
     turns.push(o);
     const f = o.result.findings;
-    if (o.result.fixed || o.action.tool !== "investigate" || !f || notes.includes(f)) break;
+    if (o.result.fixed) break;
+    if (o.forgotten?.length) continue; // stale memory was unlearned: try again without it
+    if (o.action.tool !== "investigate" || !f || notes.includes(f)) break;
     notes.push(f);
   }
   return { turns, fixed: turns.at(-1)?.result.fixed === true };

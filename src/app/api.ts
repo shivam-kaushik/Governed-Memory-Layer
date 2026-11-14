@@ -26,6 +26,7 @@ const runBody = z.object({ alertId: z.string().min(1).max(128) });
 const sinceQuery = z.coerce.number().int().min(0);
 const MONITOR_WINDOW_MS = 3_600_000;
 const EVENT_CAP = 500;
+const modeBody = z.object({ manual: z.boolean() });
 const clockBody = z.object({ op: z.enum(["advance_day", "jump_to_expiry"]) });
 
 const res = (status: number, json: unknown): ApiResponse => ({ status, json });
@@ -66,6 +67,7 @@ interface Route {
   re: RegExp;
   methods: Record<string, Handler>;
   demoOnly?: boolean;
+  manual?: boolean; // human-driven action: only when the manual switch is on
 }
 
 const visibleMemories = async (c: ApiContext, p: Principal) => {
@@ -86,6 +88,7 @@ const ROUTES: Route[] = [
   },
   {
     re: /^\/api\/memories\/correct$/,
+    manual: true,
     methods: {
       POST: async (c, _p, caller, req) => {
         const b = correctBody.safeParse(req.body);
@@ -97,6 +100,7 @@ const ROUTES: Route[] = [
   },
   {
     re: /^\/api\/memories\/forget$/,
+    manual: true,
     methods: {
       POST: async (c, _p, caller, req) => {
         const b = forgetBody.safeParse(req.body);
@@ -144,10 +148,28 @@ const ROUTES: Route[] = [
     re: /^\/api\/monitor\/alerts$/,
     methods: { GET: async (c, p) => res(200, { alerts: (await c.trace.alerts(p, 0)).filter((a) => a.tenantId === p.tenantId) }) },
   },
+  {
+    re: /^\/api\/agent\/status$/,
+    methods: { GET: async (c) => res(200, { manual: c.manual?.get() ?? true, agent: c.agentStatus?.() ?? null }) },
+  },
+  {
+    re: /^\/api\/agent\/mode$/,
+    methods: {
+      POST: async (c, p, _caller, req) => {
+        if (!c.manual) return res(409, { error: "MODE_FIXED" });
+        if (p.role === "responder") return res(403, { error: "OP_DENIED" });
+        const b = modeBody.safeParse(req.body);
+        if (!b.success) return res(400, { error: "INVALID_INPUT" });
+        c.manual.set(b.data.manual);
+        return res(200, { manual: c.manual.get() });
+      },
+    },
+  },
   { re: /^\/api\/proof$/, methods: { GET: async (c) => res(200, { report: await c.proofReport() }) } },
   { re: /^\/api\/live\/alerts$/, methods: { GET: async (c) => res(200, { alerts: c.alerts }) } },
   {
     re: /^\/api\/live\/run$/,
+    manual: true,
     methods: {
       POST: async (c, p, caller, req) => {
         const b = runBody.safeParse(req.body);
@@ -160,6 +182,7 @@ const ROUTES: Route[] = [
   {
     re: /^\/api\/live\/clock$/,
     demoOnly: true,
+    manual: true,
     methods: {
       POST: async (c, p, _caller, req) => {
         const b = clockBody.safeParse(req.body);
@@ -198,6 +221,7 @@ export function createApi(ctx: ApiContext): (req: ApiRequest) => Promise<ApiResp
     const token = tokenOf(req);
     const principal = await resolvePrincipal(ctx.resolver, token);
     if (!principal) return res(401, { error: "UNAUTHENTICATED" });
+    if (route.manual && ctx.manual && !ctx.manual.get()) return res(403, { error: "MANUAL_DISABLED" });
     try {
       return await handler(ctx, principal, { sessionToken: token, purpose: DASHBOARD_PURPOSE }, req, param);
     } catch (e) {

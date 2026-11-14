@@ -20,6 +20,8 @@ export interface TriageOutcome {
   traceId: string;
   traceComplete: boolean;
   explanation?: string; // model's own words, returned to the operator only
+  forgotten?: string[]; // memory ids the agent unlearned because acting on them did not fix the incident
+  learnedId?: string; // memory id the agent wrote after a verified fix
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -102,9 +104,12 @@ export async function runTriage(
     result = { executed: false, fixed: false, rejected: reason };
   }
 
-  await t.emit("memory_written", await writeOutcome(layer, caller, alert, action, result));
+  const written = await writeOutcome(layer, caller, alert, action, result);
+  await t.emit("memory_written", written);
   await t.emit("trace_closed", { outcome: result.rejected ?? (result.fixed ? "fixed" : "executed") });
-  return { action, result, traceId, traceComplete: t.complete, ...(rationale.explanation ? { explanation: rationale.explanation.slice(0, 600) } : {}) };
+  const forgotten = Array.isArray(written.forgotten) ? (written.forgotten as string[]) : undefined;
+  const learnedId = typeof written.memoryId === "string" ? written.memoryId : undefined;
+  return { action, result, traceId, traceComplete: t.complete, ...(forgotten ? { forgotten } : {}), ...(learnedId ? { learnedId } : {}), ...(rationale.explanation ? { explanation: rationale.explanation.slice(0, 600) } : {}) };
 }
 
 // G6 at execution time: every memory the action relies on must still be recallable right now.
@@ -120,6 +125,19 @@ async function stillValid(layer: MemoryLayer, query: RecallQuery, caller: Caller
 // Only a verified fix that did not come from memory is new knowledge worth remembering.
 async function writeOutcome(layer: MemoryLayer, caller: Caller, alert: Alert, action: Action, result: ToolResult): Promise<Record<string, unknown>> {
   if (!result.executed) return { skipped: true, reason: "NOT_EXECUTED" };
+  // Self-correction: a restart based on memory that did not fix the incident means the memory is stale. Policy decides (G9: responders forget private scope only).
+  if (!result.fixed && action.tool === "restart_cache_pool" && action.usedMemoryIds.length) {
+    const done: string[] = [];
+    for (const id of action.usedMemoryIds) {
+      try {
+        await layer.forget(id, "memory-guided action did not fix the incident", caller);
+        done.push(id);
+      } catch {
+        // denied or failed: leave the memory alone, fail closed
+      }
+    }
+    return done.length ? { forgotten: done, reason: "MEMORY_PROVED_WRONG" } : { skipped: true, reason: "FORGET_DENIED" };
+  }
   if (!result.fixed || action.tool !== "restart_cache_pool") return { skipped: true, reason: "NOT_FIXED" };
   if (action.usedMemoryIds.length) return { skipped: true, reason: "ALREADY_KNOWN" };
   const pool = String(action.args.pool);
