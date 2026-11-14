@@ -151,7 +151,8 @@ export interface AuditStore { record(e: AuditEvent): Promise<void> }
 export interface TraceStore {
   emit(e: TraceEvent): Promise<void>; // append-only
   listByTrace(p: Principal, traceId: string): Promise<TraceEvent[]>;
-  feed(p: Principal, sinceMs: number): AsyncIterable<TraceEvent>;
+  // idleMs: end after the backlog drains and nothing new arrives for that long (snapshot read). limit: cap the backlog read. Omitted: live feed.
+  feed(p: Principal, sinceMs: number, o?: { idleMs?: number; limit?: number }): AsyncIterable<TraceEvent>;
   metrics(p: Principal, windowMs: number): Promise<MonitorMetrics>;
   alerts(p: Principal, sinceMs: number): Promise<MonitorAlert[]>;
 }

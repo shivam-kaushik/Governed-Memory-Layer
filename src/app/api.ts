@@ -36,6 +36,7 @@ const runBody = z.object({ alertId: z.string().min(1).max(128) });
 const sinceQuery = z.coerce.number().int().min(0);
 const MONITOR_WINDOW_MS = 3_600_000;
 const EVENT_CAP = 500;
+const EVENT_IDLE_MS = 0; // snapshot read: return the backlog and stop (the client polls for newer events)
 const modeBody = z.object({ manual: z.boolean() });
 const clockBody = z.object({ op: z.enum(["advance_day", "jump_to_expiry"]) });
 
@@ -148,7 +149,7 @@ const ROUTES: Route[] = [
         const since = sinceQuery.safeParse(req.query?.["since"] ?? "0");
         if (!since.success) return res(400, { error: "INVALID_INPUT" });
         const events = [];
-        for await (const e of c.trace.feed(p, since.data)) {
+        for await (const e of c.trace.feed(p, since.data, { idleMs: EVENT_IDLE_MS, limit: EVENT_CAP })) {
           if (e.tenantId === p.tenantId) events.push(e);
           if (events.length >= EVENT_CAP) break;
         }
