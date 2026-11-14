@@ -52,3 +52,51 @@ describe("demo server", () => {
     expect(rep.report.seeds).toBe(20);
   });
 });
+
+describe("demo server brain selection and autonomy", () => {
+  const scriptedFetch = () => {
+    const bodies: string[] = [];
+    const f = (async (_u: string, init: RequestInit) => {
+      const body = String(init.body);
+      bodies.push(body);
+      const pool = body.match(/Notes[\s\S]*?(cp-[0-9a-f]{6})/)?.[1];
+      const mem = body.match(/id=(\S+) v\d[\s\S]*?"pool":"(cp-[0-9a-f]{6})"/);
+      const input = mem
+        ? { tool: "restart_cache_pool", args: { pool: mem[2] }, usedMemoryIds: [mem[1]], explanation: "known fix" }
+        : pool
+          ? { tool: "restart_cache_pool", args: { pool }, usedMemoryIds: [], explanation: "from findings" }
+          : { tool: "investigate", args: {}, usedMemoryIds: [], explanation: "need info" };
+      return new Response(JSON.stringify({ content: [{ type: "tool_use", id: "t", name: "choose_action", input }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    return { f, bodies };
+  };
+  type Run = { brain: string; turns: { action: { tool: string }; explanation?: string }[]; fixed: boolean };
+
+  it("without_api_key_brain_is_labeled_rule_brain", async () => {
+    const s = await buildDemoServer({ GML_DEMO: "1" });
+    const r = (await post(s, "/api/live/run", "tok-a-resp", { alertId: "alert-1" })).json as Run;
+    expect(r.brain).toBe("rule-brain");
+  });
+
+  it("with_api_key_llm_agent_investigates_fixes_and_learns_then_reuses_memory", async () => {
+    const { f } = scriptedFetch();
+    const s = await buildDemoServer({ GML_DEMO: "1", GML_WORLD: "no_precedent", ANTHROPIC_API_KEY: "sk-test", GML_MODEL: "m-1" }, { fetch: f });
+    const one = (await post(s, "/api/live/run", "tok-a-resp", { alertId: "alert-1" })).json as Run;
+    expect(one.brain).toBe("llm:m-1");
+    expect(one.turns.map((t) => t.action.tool)).toEqual(["investigate", "restart_cache_pool"]);
+    expect(one.fixed).toBe(true);
+    const mems = ((await get(s, "/api/memories", "tok-a-resp")).json as { memories: unknown[] }).memories;
+    expect(mems).toHaveLength(1);
+    const two = (await post(s, "/api/live/run", "tok-a-resp", { alertId: "alert-1" })).json as Run;
+    expect(two.turns.map((t) => t.action.tool)).toEqual(["restart_cache_pool"]);
+    expect(two.turns[0]!.explanation).toBe("known fix");
+  });
+
+  it("team_b_agent_cannot_use_team_a_learned_memory", async () => {
+    const { f } = scriptedFetch();
+    const s = await buildDemoServer({ GML_DEMO: "1", GML_WORLD: "no_precedent", ANTHROPIC_API_KEY: "sk-test" }, { fetch: f });
+    await post(s, "/api/live/run", "tok-a-resp", { alertId: "alert-1" });
+    const b = (await post(s, "/api/live/run", "tok-b-resp", { alertId: "alert-1" })).json as Run;
+    expect(b.turns[0]!.action.tool).toBe("investigate");
+  });
+});
