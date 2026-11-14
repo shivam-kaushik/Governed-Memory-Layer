@@ -3,6 +3,7 @@ import type { Caller, Memory, Principal } from "../contracts/contracts";
 import { GovernanceError } from "../core/errors";
 import { resolvePrincipal } from "../core/identity";
 import { authorize } from "../core/policy";
+import { parseAlertMessage } from "./chat";
 import type { ApiContext, ApiRequest, ApiResponse } from "./ports";
 
 // Purpose is fixed server-side. Nothing in a request can choose it (G1).
@@ -22,6 +23,7 @@ const correctBody = z.object({
   confidence: z.number().min(0).max(1).optional(),
 });
 const forgetBody = z.object({ id, reason });
+const chatBody = z.object({ message: z.string().min(1).max(1000) });
 const runBody = z.object({ alertId: z.string().min(1).max(128) });
 const sinceQuery = z.coerce.number().int().min(0);
 const MONITOR_WINDOW_MS = 3_600_000;
@@ -176,6 +178,18 @@ const ROUTES: Route[] = [
         if (!b.success) return res(400, { error: "INVALID_INPUT" });
         const alert = c.alerts.find((a) => a.id === b.data.alertId);
         return alert ? res(200, await c.runLive(p, caller.sessionToken, alert)) : res(404, { error: "NOT_FOUND" });
+      },
+    },
+  },
+  {
+    // Chat: a typed incident becomes an Alert; identity still comes only from the session.
+    re: /^\/api\/chat$/,
+    methods: {
+      POST: async (c, p, caller, req) => {
+        const b = chatBody.safeParse(req.body);
+        if (!b.success) return res(400, { error: "INVALID_INPUT" });
+        const alert = parseAlertMessage(b.data.message);
+        return alert ? res(200, await c.runLive(p, caller.sessionToken, alert)) : res(400, { error: "INVALID_ALERT" });
       },
     },
   },
