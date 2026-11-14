@@ -3,8 +3,9 @@ import type { Caller, Memory, Principal } from "../contracts/contracts";
 import { GovernanceError } from "../core/errors";
 import { resolvePrincipal } from "../core/identity";
 import { authorize } from "../core/policy";
+import { ruleChat, sanitizeRouted, type Routed } from "../agent/chat-brain";
 import { parseChatMessage } from "./chat";
-import { buildSteps } from "./timeline";
+import { buildSteps, chatSteps } from "./timeline";
 import type { ApiContext, ApiRequest, ApiResponse } from "./ports";
 
 // Purpose is fixed server-side. Nothing in a request can choose it (G1).
@@ -27,6 +28,7 @@ const forgetBody = z.object({ id, reason });
 const chatBody = z.object({
   message: z.string().min(1).max(1000),
   context: z.object({ service: z.string().max(80), version: z.string().max(20), environment: z.string().max(20) }).optional(),
+  history: z.array(z.object({ from: z.enum(["you", "agent"]), text: z.string().max(500) })).max(8).optional(),
 });
 const judgeBody = z.object({ id: id.optional() });
 const JUDGE_ACTIONS = "isolation|expiry-start|expiry-check|correct|forget|behavior|drift|reset";
@@ -207,16 +209,69 @@ const ROUTES: Route[] = [
       POST: async (c, p, caller, req) => {
         const b = chatBody.safeParse(req.body);
         if (!b.success) return res(400, { error: "INVALID_INPUT" });
-        const { alert, inferred } = parseChatMessage(b.data.message, b.data.context);
+        const { message, history = [] } = b.data;
+
+        // 1. Understand the message first: small talk and questions must not start an incident run.
+        const chat = c.chat; // without a chat brain every message is treated as an incident
+        let routed: Routed | null = chat ? null : { intent: "incident" };
+        let brainName = chat?.name ?? "";
+        try {
+          if (chat) routed = sanitizeRouted(await chat.route(message, history));
+        } catch {
+          routed = null;
+        }
+        if (!routed) {
+          routed = await ruleChat.route(message, history); // the model router failed or returned junk: deterministic fallback
+          brainName = ruleChat.name;
+        }
+        const ctx = { service: routed.service ?? b.data.context?.service ?? "", version: routed.version ?? b.data.context?.version ?? "", environment: routed.environment ?? b.data.context?.environment ?? "prod" };
+
+        if (routed.intent === "small_talk") {
+          const text = routed.reply ?? (await ruleChat.route(message, history)).reply ?? "Hello!";
+          return res(200, { kind: "chat", text, brain: brainName, usedMemoryIds: [], steps: chatSteps({ intent: "small_talk", used: [] }) });
+        }
+
+        if (routed.intent === "memory_question") {
+          const parsed = parseChatMessage(message, ctx.service && ctx.version ? ctx : undefined);
+          const service = /^unknown-service$/.test(parsed.alert.service) ? "" : parsed.alert.service;
+          const version = parsed.alert.version === "0.0.0" ? "" : parsed.alert.version;
+          if (!service || !version) {
+            const text = `Which service and version do you mean? For example "session-service 3.2.1". I only search memory that applies to a specific service and version.`;
+            return res(200, { kind: "chat", text, brain: brainName, usedMemoryIds: [], steps: chatSteps({ intent: "memory_question", used: [], note: "asked which service and version" }) });
+          }
+          const recall = await c.layer.recall({ text: message, service, version, environment: parsed.alert.environment }, caller);
+          const rejected = (await c.reads.listAudit(p, 200)).find((a) => a.op === "recall" && a.traceId === recall.traceId)?.rejectedIds ?? [];
+          let answer: { text: string; usedMemoryIds: string[] };
+          try {
+            answer = await (chat ?? ruleChat).answer(message, recall.cards, history, { service, version, environment: parsed.alert.environment });
+          } catch {
+            answer = await ruleChat.answer(message, recall.cards, history, { service, version, environment: parsed.alert.environment });
+            brainName = ruleChat.name;
+          }
+          const present = new Set(recall.cards.map((x) => x.memoryId));
+          const used = answer.usedMemoryIds.filter((x) => present.has(x)); // a model cannot cite memory it was not shown
+          return res(200, {
+            kind: "chat",
+            text: answer.text,
+            brain: brainName,
+            usedMemoryIds: used,
+            cards: recall.cards,
+            alert: { service, version, environment: parsed.alert.environment },
+            steps: chatSteps({ intent: "memory_question", fields: `${service} ${version}`, recall: { selected: recall.cards.map((x) => x.memoryId), rejected }, used }),
+          });
+        }
+
+        // Incident: governed triage with fields from the message, then the router, then earlier turns of this chat.
+        const { alert, inferred } = parseChatMessage(message, ctx.service && ctx.version ? ctx : b.data.context);
         const run = await c.runLive(p, caller.sessionToken, alert);
         const steps = async (traceId: string) => {
           const events = await c.trace.listByTrace(p, traceId);
           const recallId = events.find((e) => e.step === "recall_result")?.payload["recallTraceId"];
-          const rejected = (await c.reads.listAudit(p, 200)).find((a) => a.op === "recall" && a.traceId === recallId)?.rejectedIds ?? [];
-          return buildSteps(events, rejected, inferred);
+          const rej = (await c.reads.listAudit(p, 200)).find((a) => a.op === "recall" && a.traceId === recallId)?.rejectedIds ?? [];
+          return buildSteps(events, rej, inferred);
         };
         const turns = run.turns ? await Promise.all((run.turns as { traceId: string }[]).map(async (t) => ({ ...t, steps: await steps(t.traceId) }))) : undefined;
-        return res(200, { ...run, ...(turns ? { turns } : {}), steps: await steps(run.traceId), alert: { service: alert.service, version: alert.version, environment: alert.environment } });
+        return res(200, { ...run, kind: "incident", ...(turns ? { turns } : {}), steps: await steps(run.traceId), alert: { service: alert.service, version: alert.version, environment: alert.environment } });
       },
     },
   },

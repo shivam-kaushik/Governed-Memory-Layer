@@ -1,5 +1,6 @@
 import { ruleBrain, type AgentBrain } from "../agent/brain-rules";
 import { runEpisode } from "../agent/episode";
+import { createLlmChat, ruleChat } from "../agent/chat-brain";
 import { createLlmBrain, DEFAULT_MODEL } from "../agent/llm-brain";
 import { SCENARIO_KINDS, type ScenarioKind } from "../agent/scenarios";
 import { makeSimulator, withFindings, type ToolSimulator } from "../agent/tools";
@@ -87,6 +88,7 @@ export async function buildDemoServer(
       return { action: last.action, result: last.result, traceId: last.traceId, traceComplete: last.traceComplete, brain: brainName, fixed: e.fixed, turns: e.turns };
     },
     // Cached: the proof is deterministic, so one run serves every request.
+    chat: apiKey ? createLlmChat({ apiKey, model, ...(opts.fetch ? { fetch: opts.fetch } : {}) }) : ruleChat,
     proofReport: () => (proof ??= runProof(PROOF_SEEDS, ruleBrain, { brainName: "rule-brain" })),
     demoMode,
     manual: { get: () => manual, set: (on) => void (manual = on) },

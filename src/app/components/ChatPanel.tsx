@@ -22,9 +22,14 @@ interface Turn {
   cards?: { memoryId: string; version: number; statement: string; confidence: number; sourceAuthority: number; score: number }[];
 }
 export interface Reply {
+  kind?: "chat" | "incident"; // chat: answered conversationally, no incident run
+  text?: string; // the conversational answer (chat replies)
+  steps?: Step[]; // what the agent did to answer (chat replies)
+  usedMemoryIds?: string[];
+  cards?: Turn["cards"];
   brain: string;
-  fixed: boolean;
-  turns: Turn[];
+  fixed?: boolean;
+  turns?: Turn[];
   alert?: { service: string; version: string; environment: string };
 }
 interface Msg {
@@ -47,7 +52,7 @@ function Timeline({ steps, base }: { steps: Step[]; base: number }) {
             <strong>{st.title}</strong> <span className="tl-detail">{st.detail}</span>
             {st.ids && st.ids.length > 0 && (
               <div className="tl-ids">
-                {st.ids.map((id) => <span key={id} className={`pill pill-${st.kind === "memory" ? (st.tone === "warn" ? "forgot" : "saved") : "used"}`} title={id}>{st.kind === "memory" ? (st.tone === "warn" ? "forgot " : "saved ") : st.kind === "decision" ? "used " : "kept "}{short(id)}</span>)}
+                {st.ids.map((id) => <span key={id} className={`pill pill-${st.kind === "memory" ? (st.tone === "warn" ? "forgot" : "saved") : "used"}`} title={id}>{st.kind === "memory" ? (st.tone === "warn" ? "forgot " : "saved ") : st.kind === "decision" || st.kind === "answer" ? "used " : "kept "}{short(id)}</span>)}
               </div>
             )}
             {st.rejected && st.rejected.length > 0 && (
@@ -62,7 +67,30 @@ function Timeline({ steps, base }: { steps: Step[]; base: number }) {
   );
 }
 
-export function AgentReply({ reply }: { reply: Reply }) {
+function ChatAnswer({ reply }: { reply: Reply }) {
+  return (
+    <>
+      <p className="said">{reply.text}</p>
+      {reply.steps && <Timeline steps={reply.steps} base={0} />}
+      {reply.cards && reply.cards.length > 0 && (
+        <details className="evidence-box">
+          <summary>Memory the agent read ({reply.cards.length})</summary>
+          {reply.cards.map((c) => (
+            <div key={c.memoryId} className="evidence">
+              {c.statement}
+              <div><small className="mono">{c.memoryId} v{c.version}</small> <small>· confidence {c.confidence} · authority {c.sourceAuthority} · match {c.score.toFixed(2)}</small></div>
+            </div>
+          ))}
+        </details>
+      )}
+      <p className="tl-head"><small>brain: {reply.brain}</small></p>
+    </>
+  );
+}
+
+export function AgentReply({ reply: r }: { reply: Reply }) {
+  if (r.kind === "chat") return <ChatAnswer reply={r} />;
+  const reply = { ...r, turns: r.turns ?? [], fixed: !!r.fixed };
   const last = reply.turns.at(-1);
   return (
     <>
@@ -91,7 +119,7 @@ export function AgentReply({ reply }: { reply: Reply }) {
   );
 }
 
-const EXAMPLES = ["charging sessions failing with 5xx on session-service 3.2.1 in prod after deploy", "charging sessions failing with 5xx on roaming-service 1.4.0 in prod after deploy", "that did not work, what else can we try?"];
+const EXAMPLES = ["hi, what can you do?", "what do you remember about session-service 3.2.1?", "charging sessions failing with 5xx on session-service 3.2.1 in prod after deploy", "charging sessions failing with 5xx on roaming-service 1.4.0 in prod after deploy", "that did not work, what else can we try?"];
 
 interface Chat { id: string; title: string; msgs: Msg[] }
 const fresh = (): Chat => ({ id: crypto.randomUUID(), title: "New chat", msgs: [] });
@@ -149,17 +177,28 @@ export function ChatPanel() {
     setText("");
   };
 
+  const remove = (id: string) => {
+    const c = chats.find((x) => x.id === id);
+    if (c?.msgs.length && !window.confirm(`Delete chat "${c.title}"? This cannot be undone.`)) return;
+    const rest = chats.filter((x) => x.id !== id);
+    const next = rest.length ? rest : [fresh()];
+    setChats(next);
+    if (id === activeId) setActiveId(next[0]!.id);
+  };
+
   const send = async (message: string) => {
     if (!message.trim() || busy) return;
     const id = activeId;
     // Follow-ups reuse the service/version the last reply in this chat worked on.
     const prior = [...(chats.find((c) => c.id === id)?.msgs ?? [])].reverse().find((m) => m.reply?.alert && m.reply.alert.service !== "unknown-service")?.reply?.alert;
     const context = prior ? { service: prior.service, version: prior.version, environment: prior.environment } : undefined;
+    // Recent conversation, so the agent can follow up ("that didn't work") and know when memory applies.
+    const history = (chats.find((c) => c.id === id)?.msgs ?? []).slice(-8).map((m) => ({ from: m.from, text: (m.text ?? m.reply?.text ?? m.reply?.turns?.at(-1)?.explanation ?? "").slice(0, 500) })).filter((h) => h.text);
     setBusy(true);
     add(id, { from: "you", text: message });
     setText("");
     try {
-      const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message, ...(context ? { context } : {}) }) });
+      const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message, ...(context ? { context } : {}), history }) });
       const j = (await r.json()) as Json;
       const fail = r.status === 401 ? "Pick a session in the sidebar first." : `Error: ${String(j["error"])}`;
       add(id, r.ok ? { from: "agent", reply: j as unknown as Reply } : { from: "agent", text: fail, error: true });
@@ -174,13 +213,16 @@ export function ChatPanel() {
       <div className="chatbar" role="tablist" aria-label="Chats">
         <button className="send" onClick={newChat} disabled={busy}>+ New chat</button>
         {chats.map((c) => (
-          <button key={c.id} role="tab" aria-selected={c.id === activeId} className={c.id === activeId ? "chip on" : "chip"} onClick={() => setActiveId(c.id)} disabled={busy}>{c.title}</button>
+          <span key={c.id} className={c.id === activeId ? "chip on tabwrap" : "chip tabwrap"}>
+            <button role="tab" aria-selected={c.id === activeId} className="tabbtn" onClick={() => setActiveId(c.id)} disabled={busy}>{c.title}</button>
+            <button className="tabx" aria-label={`Delete chat ${c.title}`} title="Delete chat" onClick={() => remove(c.id)} disabled={busy}>×</button>
+          </span>
         ))}
       </div>
       {msgs.length === 0 ? (
         <div className="hero">
           <h1>Ask an agent that remembers, within limits.</h1>
-          <p>Every memory it recalls is scoped, versioned, expiring and audited. Describe an incident to see it work.</p>
+          <p>Every memory it recalls is scoped, versioned, expiring and audited. Describe an incident, or just chat: it decides when memory applies.</p>
           <div className="chips">
             {EXAMPLES.map((e) => (
               <button key={e} className="chip" onClick={() => setText(e)} disabled={busy}>{e}</button>
@@ -196,7 +238,7 @@ export function ChatPanel() {
               {m.reply && <AgentReply reply={m.reply} />}
             </div>
           ))}
-          {busy && <div className="msg working" aria-live="polite"><span className="who">Agent</span><span className="shimmer">Reading your message, searching memory, deciding…</span></div>}
+          {busy && <div className="msg working" aria-live="polite"><span className="who">Agent</span><span className="shimmer">Reading your message…</span></div>}
         </div>
       )}
       <form className="composer" onSubmit={(e) => { e.preventDefault(); void send(text); }}>

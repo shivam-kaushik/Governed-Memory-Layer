@@ -1,7 +1,7 @@
 import type { TraceEvent } from "../contracts/contracts";
 
 export interface Step {
-  kind: "understood" | "recall" | "decision" | "guard" | "tool" | "memory";
+  kind: "understood" | "recall" | "decision" | "guard" | "tool" | "memory" | "answer";
   title: string;
   detail: string;
   tone: "ok" | "warn" | "bad" | "info";
@@ -40,4 +40,17 @@ export function buildSteps(events: TraceEvent[], rejected: { id: string; reason:
       detail: forgot.length ? "forgot memory that did not fix the incident" : typeof m.memoryId === "string" ? `saved a new ${String(m.status)} memory` : `no change (${String(m.reason ?? "none")})`,
     },
   ];
+}
+
+const LABEL = { small_talk: "small talk, no memory needed", memory_question: "a question about what memory holds", incident: "an incident to triage" } as const;
+
+// Steps for a conversational reply (no triage run): what the agent understood, what it searched, how it answered.
+export function chatSteps(o: { intent: keyof typeof LABEL; fields?: string; recall?: { selected: string[]; rejected: { id: string; reason: string }[] }; used: string[]; note?: string }): Step[] {
+  const steps: Step[] = [{ kind: "understood", title: "Read your message", tone: "info", detail: `this is ${LABEL[o.intent]}${o.fields ? ` (${o.fields})` : ""}` }];
+  if (o.recall) {
+    const n = o.recall.selected.length;
+    steps.push({ kind: "recall", title: "Searched governed memory", tone: n ? "ok" : "warn", ids: o.recall.selected, rejected: o.recall.rejected, detail: n ? `${n} eligible, ${o.recall.rejected.length} rejected` : `nothing eligible (${o.recall.rejected.length} rejected)` });
+  }
+  steps.push({ kind: "answer", title: "Replied", tone: "ok", ids: o.used, detail: o.note ?? (o.used.length ? "relying on memory" : "without using memory") });
+  return steps;
 }

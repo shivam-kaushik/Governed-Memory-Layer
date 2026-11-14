@@ -1,4 +1,5 @@
 import type { Alert, AuditEvent, Clock, EvalStore, Memory, MemoryLayer, Principal, TraceStore } from "../contracts/contracts";
+import type { ChatBrain } from "../agent/chat-brain";
 import type { PrincipalResolver } from "../core/deps";
 
 // Read-only views the dashboard needs that the frozen seam does not offer.
@@ -50,4 +51,5 @@ export interface ApiContext {
   manual?: { get(): boolean; set(on: boolean): void }; // manual controls switch; off means the agent runs alone
   agentStatus?(): unknown;
   judge?: JudgeApi;
+  chat?: ChatBrain; // decides small talk vs memory question vs incident; absent means every message is an incident
 }

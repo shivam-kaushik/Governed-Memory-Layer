@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ruleBrain, type AgentBrain } from "../agent/brain-rules";
 import { runEpisode } from "../agent/episode";
+import { createLlmChat, ruleChat } from "../agent/chat-brain";
 import { createLlmBrain, DEFAULT_MODEL } from "../agent/llm-brain";
 import { makeSimulator, withFindings } from "../agent/tools";
 import { EMBEDDING_MODEL } from "../contracts/contracts";
@@ -90,6 +91,7 @@ export async function buildMongoServer(env: Record<string, string | undefined>, 
       const last = e.turns[e.turns.length - 1]!;
       return { action: last.action, result: last.result, traceId: last.traceId, traceComplete: last.traceComplete, brain: brainName, fixed: e.fixed, turns: e.turns };
     },
+    chat: apiKey ? createLlmChat({ apiKey, model, ...(opts.fetch ? { fetch: opts.fetch } : {}) }) : ruleChat,
     proofReport: () => runProof([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], ruleBrain, { brainName: "rule-brain" }),
     demoMode: true,
     manual: { get: () => true, set: () => undefined }, // no background loop here: human actions (correct, forget) are always on; policy still decides
