@@ -46,15 +46,18 @@ export function validateAction(raw: unknown, evidenceIds: string[]): Validation 
 }
 
 // Deterministic state machine: a cache-pool restart fixes the incident only for the true pool.
-export function makeSimulator(truePool: string): ToolSimulator {
+// Optional extras make other incidents fixable the same way: a rollback to the true version, or enough replicas.
+export function makeSimulator(truePool: string, extra: { rollbackVersion?: string; minReplicas?: number } = {}): ToolSimulator {
   return {
     run(action) {
       switch (action.tool) {
         case "restart_cache_pool":
           return { executed: true, fixed: action.args.pool === truePool };
-        case "investigate":
         case "rollback_deploy":
+          return { executed: true, fixed: extra.rollbackVersion !== undefined && action.args.version === extra.rollbackVersion };
         case "scale_service":
+          return { executed: true, fixed: extra.minReplicas !== undefined && typeof action.args.replicas === "number" && action.args.replicas >= extra.minReplicas };
+        case "investigate":
           return { executed: true, fixed: false };
         default:
           return { executed: false, fixed: false, rejected: "TOOL_NOT_ALLOWED" };
@@ -64,12 +67,12 @@ export function makeSimulator(truePool: string): ToolSimulator {
 }
 
 // Demo variant: investigating surfaces the failing pool (like reading logs). Other tools are unchanged.
-export function withFindings(base: ToolSimulator, truePool: string): ToolSimulator {
+export function withFindings(base: ToolSimulator, truePool: string, findings?: string): ToolSimulator {
   return {
     run(action) {
       const r = base.run(action);
       return action.tool === "investigate" && r.executed
-        ? { ...r, findings: `Logs: cache pool ${truePool} is saturated, connection timeouts behind the 5xx spike.` }
+        ? { ...r, findings: findings ?? `Logs: cache pool ${truePool} is saturated, connection timeouts behind the 5xx spike.` }
         : r;
     },
   };

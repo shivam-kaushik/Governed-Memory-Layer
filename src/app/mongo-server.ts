@@ -26,16 +26,27 @@ import type { DemoServer } from "./server";
 
 // Session token -> seeded principal id. The principal itself (tenant, role, scopes) is read from Atlas.
 const TOKENS: Record<string, string> = { "tok-a-resp": "alice", "tok-a-rev": "rita", "tok-b-resp": "bob" };
-// The simulated infra's true failing pool. Seeded services match the seeded fixes; anything else gets a stable derived pool.
-const KNOWN_POOLS: Record<string, string> = {
-  "tenantA|session-service": "cp-7f3a",
-  "tenantA|billing-service": "cp-1b9d",
-  "tenantB|session-service": "cp-9e41",
+// The simulated infrastructure's ground truth per (tenant, service): what actually fixes the incident.
+// Seeded services match the seeded memories; anything else gets a stable derived pool.
+interface Truth { pool: string; rollbackVersion?: string; minReplicas?: number; findings?: string }
+const TRUTHS: Record<string, Truth> = {
+  "tenantA|session-service": { pool: "cp-7f3a" },
+  "tenantA|billing-service": { pool: "cp-1b9d" },
+  "tenantA|charger-gateway-service": { pool: "cp-5c21" },
+  "tenantA|roaming-service": { pool: "cp-0000", rollbackVersion: "2.3.8", findings: "Logs: the first failed partner handshakes line up with the 2.4.0 deploy. Cache and database look healthy." },
+  "tenantA|payments-service": { pool: "cp-0000", minReplicas: 8, findings: "Metrics: authorization latency climbs with evening load and CPU is saturated on the 4 running replicas." },
+  "tenantB|session-service": { pool: "cp-9e41" },
+  "tenantB|billing-service": { pool: "cp-b7d2" },
+  "tenantB|roaming-service": { pool: "cp-0000", rollbackVersion: "2.3.5", findings: "Logs: the first failed partner handshakes line up with the 2.4.0 deploy. Cache and database look healthy." },
 };
 // Drift: the real pool can be rotated at runtime so learned fixes go stale (see the Drift experiment).
 const drifted = new Map<string, string>();
-export const truePool = (tenantId: string, service: string) =>
-  drifted.get(`${tenantId}|${service}`) ?? KNOWN_POOLS[`${tenantId}|${service}`] ?? `cp-${sha256(`${tenantId}|${service}`).slice(0, 4)}`;
+const truthFor = (tenantId: string, service: string): Truth => {
+  const k = `${tenantId}|${service}`;
+  const t = TRUTHS[k] ?? { pool: `cp-${sha256(k).slice(0, 4)}` };
+  return { ...t, pool: drifted.get(k) ?? t.pool };
+};
+export const truePool = (tenantId: string, service: string) => truthFor(tenantId, service).pool;
 
 // Atlas-backed composition root (GML_STORE=mongo). Memory, audit and traces are real; only the infra tools are simulated.
 export async function buildMongoServer(env: Record<string, string | undefined>, opts: { fetch?: typeof fetch } = {}): Promise<DemoServer> {
@@ -73,10 +84,11 @@ export async function buildMongoServer(env: Record<string, string | undefined>, 
     clock: systemClock,
     alerts: [],
     runLive: async (principal, sessionToken, alert) => {
-      const pool = truePool(principal.tenantId, alert.service);
+      const t = truthFor(principal.tenantId, alert.service);
+      const pool = t.pool;
       const e = await runEpisode(alert, { sessionToken, purpose: "incident-triage" }, layer, brain, trace, systemClock, {
         principal,
-        simulator: withFindings(makeSimulator(pool), pool),
+        simulator: withFindings(makeSimulator(pool, { ...(t.rollbackVersion ? { rollbackVersion: t.rollbackVersion } : {}), ...(t.minReplicas ? { minReplicas: t.minReplicas } : {}) }), pool, t.findings),
         newId: deps.newId,
       });
       s.ticks++;
