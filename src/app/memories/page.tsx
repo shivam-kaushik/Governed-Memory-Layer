@@ -4,7 +4,7 @@ import { load } from "../page-data";
 
 export default async function MemoriesPage() {
   const { status, data } = await load<{ memories: MemoryRow[] }>("/api/memories");
-  if (status === 401) return <p>Pick a session above to continue.</p>;
+  if (status === 401) return <p>Pick a session in the sidebar to continue.</p>;
   const mode = await load<{ manual: boolean }>("/api/agent/status");
   return (
     <>

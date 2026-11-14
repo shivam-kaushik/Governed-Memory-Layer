@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { readSession, SESSION_EVENT } from "./session-cookie";
 
 type Json = Record<string, unknown>;
 interface Turn {
@@ -61,49 +62,111 @@ export function AgentReply({ reply }: { reply: Reply }) {
 
 const EXAMPLES = ["charging sessions failing with 5xx on session-service 3.2.1 in prod after deploy", "charging sessions failing with 5xx on roaming-service 1.4.0 in prod after deploy"];
 
-// Type an incident; the agent recalls governed memory, acts, and the cards/tables around this panel update live.
+interface Chat { id: string; title: string; msgs: Msg[] }
+const fresh = (): Chat => ({ id: crypto.randomUUID(), title: "New chat", msgs: [] });
+const KEY = (t: string) => `gml:chats:${t}`;
+
+// Chats live in this browser only, keyed by session token, so each tenant/user sees just their own.
+function loadChats(token: string): Chat[] {
+  try {
+    const c = token ? (JSON.parse(localStorage.getItem(KEY(token)) ?? "null") as Chat[] | null) : null;
+    if (c?.length) return c;
+  } catch {
+    // unreadable storage: start clean
+  }
+  return [fresh()];
+}
+
+// Type an incident; the agent recalls governed memory and acts. History is per session.
 export function ChatPanel() {
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [token, setToken] = useState("");
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeId, setActiveId] = useState("");
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    const sync = () => setToken(readSession());
+    sync();
+    window.addEventListener(SESSION_EVENT, sync);
+    return () => window.removeEventListener(SESSION_EVENT, sync);
+  }, []);
+  useEffect(() => {
+    const c = loadChats(token);
+    setChats(c);
+    setActiveId(c[0]!.id);
+    setText("");
+    setLoadedFor(token);
+  }, [token]);
+  useEffect(() => {
+    if (!token || loadedFor !== token) return;
+    try {
+      localStorage.setItem(KEY(token), JSON.stringify(chats));
+    } catch {
+      // quota or blocked storage: history just won't persist
+    }
+  }, [chats, token, loadedFor]);
+
+  const msgs = chats.find((c) => c.id === activeId)?.msgs ?? [];
+  const add = (id: string, m: Msg) =>
+    setChats((cs) => cs.map((c) => (c.id === id ? { ...c, title: c.msgs.length === 0 && m.from === "you" ? (m.text ?? "").slice(0, 32) : c.title, msgs: [...c.msgs, m] } : c)));
+  const newChat = () => {
+    const c = fresh();
+    setChats((cs) => [c, ...cs]);
+    setActiveId(c.id);
+    setText("");
+  };
+
   const send = async (message: string) => {
     if (!message.trim() || busy) return;
+    const id = activeId;
     setBusy(true);
-    setMsgs((m) => [...m, { from: "you", text: message }]);
+    add(id, { from: "you", text: message });
     setText("");
     try {
       const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }) });
       const j = (await r.json()) as Json;
-      const fail = r.status === 401 ? "Pick a session in the top bar first." : j["error"] === "INVALID_ALERT" ? "Include a service (e.g. checkout-service) and a version (e.g. 2.3.1)." : `Error: ${String(j["error"])}`;
-      setMsgs((m) => [...m, r.ok ? { from: "agent", reply: j as unknown as Reply } : { from: "agent", text: fail, error: true }]);
+      const fail = r.status === 401 ? "Pick a session in the sidebar first." : j["error"] === "INVALID_ALERT" ? "Include a service (e.g. checkout-service) and a version (e.g. 2.3.1)." : `Error: ${String(j["error"])}`;
+      add(id, r.ok ? { from: "agent", reply: j as unknown as Reply } : { from: "agent", text: fail, error: true });
     } catch {
-      setMsgs((m) => [...m, { from: "agent", text: "Request failed.", error: true }]);
+      add(id, { from: "agent", text: "Request failed.", error: true });
     }
     setBusy(false);
   };
 
   return (
-    <section>
-      <h3>Report an incident</h3>
-      <p>
-        Describe an incident. Examples:{" "}
-        {EXAMPLES.map((e) => (
-          <button key={e} onClick={() => setText(e)} disabled={busy}>{e}</button>
-        ))}
-      </p>
-      <div style={{ border: "1px solid #ddd", padding: ".6rem", maxHeight: 360, overflow: "auto" }}>
-        {msgs.length === 0 && <em>No messages yet.</em>}
-        {msgs.map((m, i) => (
-          <div key={i} style={{ margin: ".5rem 0" }}>
-            <strong>{m.from === "you" ? "Alert from you:" : "Agent:"}</strong> {m.text && <span className={m.error ? "err" : ""}>{m.text}</span>}
-            {m.reply && <AgentReply reply={m.reply} />}
-          </div>
+    <section className="chat">
+      <div className="chatbar" role="tablist" aria-label="Chats">
+        <button className="send" onClick={newChat} disabled={busy}>+ New chat</button>
+        {chats.map((c) => (
+          <button key={c.id} role="tab" aria-selected={c.id === activeId} className={c.id === activeId ? "chip on" : "chip"} onClick={() => setActiveId(c.id)} disabled={busy}>{c.title}</button>
         ))}
       </div>
-      <form onSubmit={(e) => { e.preventDefault(); void send(text); }} style={{ display: "flex", gap: ".4rem", marginTop: ".5rem" }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="charging sessions failing with 5xx on session-service 3.2.1 in prod" style={{ flex: 1, padding: ".4rem" }} maxLength={1000} />
-        <button type="submit" disabled={busy || !text.trim()}>{busy ? "Agent working..." : "Send"}</button>
+      {msgs.length === 0 ? (
+        <div className="hero">
+          <h1>Ask an agent that remembers, within limits.</h1>
+          <p>Every memory it recalls is scoped, versioned, expiring and audited. Describe an incident to see it work.</p>
+          <div className="chips">
+            {EXAMPLES.map((e) => (
+              <button key={e} className="chip" onClick={() => setText(e)} disabled={busy}>{e}</button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="thread" aria-live="polite">
+          {msgs.map((m, i) => (
+            <div key={i} className={m.from === "you" ? "msg you" : "msg"}>
+              <span className="who">{m.from === "you" ? "You" : "Agent"}</span>
+              {m.text && <span className={m.error ? "err" : ""}>{m.text}</span>}
+              {m.reply && <AgentReply reply={m.reply} />}
+            </div>
+          ))}
+        </div>
+      )}
+      <form className="composer" onSubmit={(e) => { e.preventDefault(); void send(text); }}>
+        <input aria-label="Describe an incident" value={text} onChange={(e) => setText(e.target.value)} placeholder="charging sessions failing with 5xx on session-service 3.2.1 in prod" maxLength={1000} />
+        <button className="send" type="submit" disabled={busy || !text.trim()}>{busy ? "Working..." : "Send"}</button>
       </form>
     </section>
   );
