@@ -46,7 +46,9 @@ describe("views", () => {
   it("proof_scorecard_names_brain_counts_and_limits", () => {
     const arm = (s: number) => ({ n: 20, success: s, rate: s / 20, ci: [0.8, 1] as [number, number] });
     const report = { brain: "rule-brain", seeds: 20, arms: { R: arm(20), O: arm(0), P: arm(0), C: arm(20) },
-      uplift: { rMinusP: 1, lower: 0.8, upper: 1 }, targetedResponse: 1, collateralStability: 1, harmfulAdoption: 0, harmfulTrials: 80 };
+      uplift: { rMinusP: 1, lower: 0.8, upper: 1 }, targetedResponse: 1, collateralStability: 1, harmfulAdoption: 0, harmfulTrials: 80,
+      gates: { crossTenantLeaks: { count: 0, trials: 300 }, expiredUses: { count: 0, trials: 20 }, forgottenRecoveries: { count: 0, trials: 60 }, harmfulAdoption: { count: 0, trials: 80 }, traceCompleteness: { audited: 100, ops: 100 } },
+      armTable: { seed: 1, rows: [] } };
     const html = renderToStaticMarkup(h(ProofScorecard, { report }));
     expect(html).toContain("rule-brain");
     expect(html).toContain("0 / 80");

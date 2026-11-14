@@ -22,6 +22,7 @@ export interface TriageOutcome {
   explanation?: string; // model's own words, returned to the operator only
   forgotten?: string[]; // memory ids the agent unlearned because acting on them did not fix the incident
   learnedId?: string; // memory id the agent wrote after a verified fix
+  cards: EvidenceCard[]; // the evidence recall returned for this turn: shown to the same principal who recalled it
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -109,7 +110,7 @@ export async function runTriage(
   await t.emit("trace_closed", { outcome: result.rejected ?? (result.fixed ? "fixed" : "executed") });
   const forgotten = Array.isArray(written.forgotten) ? (written.forgotten as string[]) : undefined;
   const learnedId = typeof written.memoryId === "string" ? written.memoryId : undefined;
-  return { action, result, traceId, traceComplete: t.complete, ...(forgotten ? { forgotten } : {}), ...(learnedId ? { learnedId } : {}), ...(rationale.explanation ? { explanation: rationale.explanation.slice(0, 600) } : {}) };
+  return { action, result, traceId, traceComplete: t.complete, cards, ...(forgotten ? { forgotten } : {}), ...(learnedId ? { learnedId } : {}), ...(rationale.explanation ? { explanation: rationale.explanation.slice(0, 600) } : {}) };
 }
 
 // G6 at execution time: every memory the action relies on must still be recallable right now.

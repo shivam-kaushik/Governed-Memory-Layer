@@ -48,6 +48,8 @@ function memoryView(m: Memory, nowMs: number) {
     id: m._id,
     scope: m.scopeId,
     status: m.status,
+    // Expiry is a read-time gate: the stored status stays 'active', the display says expired.
+    displayStatus: m.status === "active" && m.expiresAtMs <= nowMs ? "expired" : m.status,
     version: m.version,
     supersedes: m.supersedes ?? null,
     derivedFrom: m.derivedFrom,
@@ -57,6 +59,7 @@ function memoryView(m: Memory, nowMs: number) {
     value: m.value,
     appliesTo: m.appliesTo,
     confidence: m.confidence,
+    sourceAuthority: m.sourceAuthority,
     source: m.source,
     createdBy: m.createdBy,
     expiresAtMs: m.expiresAtMs,
