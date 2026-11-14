@@ -76,7 +76,7 @@ export async function runProof(seeds: number[], brain: Brain, opts: ProofOptions
         scenarioId: `proof-${seed}`,
         arm,
         seed,
-        action,
+        action: { ...action },
         scores: { success: score.success, toolMatch: score.toolMatch, argMatch: score.argMatch, memoryDriven: score.memoryDriven },
         createdAtMs: cp.nowMs,
       });

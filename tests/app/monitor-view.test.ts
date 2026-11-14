@@ -32,7 +32,7 @@ describe("monitor view helpers", () => {
     const html = renderToStaticMarkup(
       createElement(MonitorView, {
         events: [ev("<script>x</script>", "alert_received", {}, 1)],
-        metrics: { windowMs: 1, recalls: 3, denies: 1, denyRate: 1 / 3, rejectedPerRecall: 0, actionsByType: { investigate: 2 }, abstainRate: 1, stepLatencyMs: {} },
+        metrics: { windowMs: 1, recallsPerTenant: 3, recalls: 3, denies: 1, denyRate: 1 / 3, rejectedPerRecall: 0, actionsByType: { investigate: 2 }, abstainRate: 1, stepLatencyMs: {} },
         alerts: [{ kind: "tool_guard_rejected", traceId: "t9", tenantId: "tenant-a", createdAtMs: 1, detail: "TOOL_NOT_ALLOWED" }],
       }),
     );

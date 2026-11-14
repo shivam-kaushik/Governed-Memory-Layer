@@ -261,7 +261,7 @@ describe("FakeTraceStore", () => {
     await t.emit(ev({ _id: "new", createdAtMs: NOW + 5 }));
     await t.emit(ev({ _id: "foreign", tenantId: "tB", createdAtMs: NOW + 5 }));
     const got: string[] = [];
-    for await (const e of t.feed(pA, NOW)) got.push(e._id);
+    for await (const e of t.feed(pA, NOW)) got.push(e._id as string);
     expect(got).toEqual(["new"]);
   });
 });

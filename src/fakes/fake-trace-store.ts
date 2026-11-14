@@ -40,6 +40,7 @@ export class FakeTraceStore implements TraceStore {
     const total = Object.values(actionsByType).reduce((s, n) => s + n, 0);
     return {
       windowMs,
+      recallsPerTenant: recallEvents.length,
       recalls: recallEvents.length,
       denies,
       denyRate: recallEvents.length ? denies / recallEvents.length : 0,
