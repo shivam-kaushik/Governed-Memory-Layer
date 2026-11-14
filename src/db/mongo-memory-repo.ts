@@ -1,0 +1,194 @@
+import type { Db, Collection } from "mongodb";
+import { randomUUID } from "node:crypto";
+import type { Clock, Memory, MemoryRepo, Principal } from "../contracts/contracts.js";
+import { systemClock } from "./system-clock.js";
+import { VECTOR_INDEX_NAME } from "./vector-index.js";
+
+// Grace period between expiry and the TTL cleanup index removing the doc.
+export const PURGE_GRACE_MS = 7 * 24 * 3600 * 1000;
+
+// tenantId always comes from the Principal argument, never from a doc or filter the caller built (G1, G3).
+export function derivedQuery(p: Principal, id: string) {
+  return { filter: { tenantId: p.tenantId, derivedFrom: id }, hint: "derivedFrom_1" };
+}
+
+// TTL cleanup runs on real wall-clock time, so purgeAt is anchored to the system clock even when the
+// logical Clock (demo clock jumps, fake clocks in tests) is far behind: cleanup must never delete a live memory.
+export function purgeAtFor(expiresAtMs: number): Date {
+  return new Date(Math.max(expiresAtMs, systemClock.nowMs()) + PURGE_GRACE_MS);
+}
+
+export const NUM_CANDIDATES = 200;
+
+// Trusted prefilter (plan 4.4): built only from the Principal and server-resolved scopes/time.
+// Anything else on `q` (e.g. a forged tenantId) is never read.
+export function buildVectorSearchPipeline(
+  p: Principal,
+  q: { vector: number[]; scopeIds: string[]; nowMs: number; limit: number },
+  exact = false,
+): object[] {
+  const search: Record<string, unknown> = {
+    index: VECTOR_INDEX_NAME,
+    path: "embedding",
+    queryVector: q.vector,
+    limit: q.limit,
+    filter: {
+      $and: [
+        { tenantId: { $eq: p.tenantId } },
+        { scopeId: { $in: q.scopeIds } },
+        { status: { $eq: "active" } },
+        { validFromMs: { $lte: q.nowMs } },
+        { expiresAtMs: { $gt: q.nowMs } },
+      ],
+    },
+  };
+  if (exact) search.exact = true; else search.numCandidates = NUM_CANDIDATES;
+  return [{ $vectorSearch: search }, { $project: { _id: 1, score: { $meta: "vectorSearchScore" } } }];
+}
+
+// Fail closed on a missing/malformed principal and on non-string values (a `{ $ne: null }` object would
+// otherwise be interpreted by Mongo as a query operator).
+function assertPrincipal(p: Principal): void {
+  if (!p || typeof p.tenantId !== "string" || p.tenantId === "" || !Array.isArray(p.scopes)) throw new Error("invalid principal: fail closed");
+}
+function assertString(v: unknown, what: string): asserts v is string {
+  if (typeof v !== "string") throw new Error(`${what} must be a string`);
+}
+function assertStrings(vs: unknown[], what: string): void { vs.forEach((v) => assertString(v, what)); }
+
+export class MongoMemoryRepo implements MemoryRepo {
+  constructor(protected readonly db: Db, protected readonly clock: Clock = systemClock) {}
+
+  protected get memories(): Collection<any> { return this.db.collection("memories"); }
+  protected get tombstones(): Collection<any> { return this.db.collection("tombstones"); }
+
+  async insert(p: Principal, doc: Memory): Promise<void> {
+    if (await this.isTombstoned(p, doc._id, doc.contentHash)) throw new Error("TOMBSTONED: id or content was forgotten");
+    await this.memories.insertOne({ ...doc, tenantId: p.tenantId, purgeAt: purgeAtFor(doc.expiresAtMs) });
+  }
+
+  // Reads see only this tenant, only the principal's own scopes, and never a doc already marked deleted
+  // (the authoritative recheck after a possibly stale vector index, G5).
+  private readable(p: Principal) {
+    return { tenantId: p.tenantId, scopeId: { $in: p.scopes }, status: { $ne: "deleted" } };
+  }
+
+  async getById(p: Principal, id: string): Promise<Memory | null> {
+    assertPrincipal(p); assertString(id, "id");
+    return (await this.memories.findOne({ _id: id, ...this.readable(p) })) as Memory | null;
+  }
+
+  async byIds(p: Principal, ids: string[]): Promise<Memory[]> {
+    assertPrincipal(p); assertStrings(ids, "id");
+    if (ids.length === 0) return [];
+    return (await this.memories.find({ _id: { $in: ids }, ...this.readable(p) }).toArray()) as Memory[];
+  }
+
+  async findActiveByClaimKey(p: Principal, scopeIds: string[], claimKey: string): Promise<Memory[]> {
+    assertPrincipal(p); assertStrings(scopeIds, "scopeId"); assertString(claimKey, "claimKey");
+    const allowed = scopeIds.filter((s) => p.scopes.includes(s));
+    if (allowed.length === 0) return [];
+    return (await this.memories.find({ tenantId: p.tenantId, scopeId: { $in: allowed }, claimKey, status: "active" }).toArray()) as Memory[];
+  }
+
+  async setStatus(p: Principal, id: string, status: Memory["status"]): Promise<void> {
+    assertPrincipal(p); assertString(id, "id");
+    await this.memories.updateOne({ _id: id, tenantId: p.tenantId }, { $set: { status } });
+  }
+
+  async findDerived(p: Principal, id: string): Promise<string[]> {
+    assertPrincipal(p); assertString(id, "id");
+    const { filter, hint } = derivedQuery(p, id);
+    const rows = await this.memories.find(filter, { projection: { _id: 1 } }).hint(hint).toArray();
+    return rows.map((r) => r._id as string);
+  }
+
+  async isTombstoned(p: Principal, id: string, contentHash?: string): Promise<boolean> {
+    assertPrincipal(p); assertString(id, "id"); if (contentHash !== undefined) assertString(contentHash, "contentHash");
+    const or: object[] = [{ targetId: id }];
+    if (contentHash) or.push({ contentHash });
+    return (await this.tombstones.countDocuments({ tenantId: p.tenantId, $or: or }, { limit: 1 })) > 0;
+  }
+
+  // Candidate list only: the index is eventually consistent, so callers MUST recheck via byIds (plan 3.2).
+  async vectorSearch(
+    p: Principal,
+    q: { vector: number[]; scopeIds: string[]; nowMs: number; limit: number },
+    opts: { exact?: boolean } = {},
+  ): Promise<Array<{ id: string; score: number }>> {
+    assertPrincipal(p); assertStrings(q.scopeIds, "scopeId");
+    const scopeIds = q.scopeIds.filter((s) => p.scopes.includes(s)); // requested scopes limited to the principal's own
+    if (scopeIds.length === 0) return [];
+    const rows = await this.memories.aggregate(buildVectorSearchPipeline(p, { ...q, scopeIds }, opts.exact)).toArray();
+    return rows.map((r) => ({ id: r._id as string, score: r.score as number }));
+  }
+
+  // ---- A4: lifecycle persistence ----
+
+  // Old doc -> superseded and new doc inserted in ONE transaction (all or nothing).
+  async supersede(p: Principal, oldId: string, newDoc: Memory): Promise<void> {
+    assertPrincipal(p); assertString(oldId, "id");
+    const session = this.db.client.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const res = await this.memories.updateOne(
+          { _id: oldId, tenantId: p.tenantId, status: { $in: ["active", "disputed"] } },
+          { $set: { status: "superseded" } },
+          { session },
+        );
+        if (res.matchedCount !== 1) throw new Error("SUPERSEDE_TARGET_NOT_FOUND");
+        await this.memories.insertOne(
+          { ...newDoc, tenantId: p.tenantId, supersedes: oldId, purgeAt: purgeAtFor(newDoc.expiresAtMs) },
+          { session },
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  // Tombstone (id + content hash only) first, then delete content and embedding, in ONE transaction.
+  async tombstoneAndPurge(p: Principal, ids: string[], reason: string): Promise<{ tombstoneIds: string[] }> {
+    assertPrincipal(p); assertStrings(ids, "id");
+    const tombstoneIds: string[] = [];
+    const session = this.db.client.startSession();
+    try {
+      await session.withTransaction(async () => {
+        tombstoneIds.length = 0;
+        for (const id of ids) {
+          const doc = await this.memories.findOne({ _id: id, tenantId: p.tenantId }, { session, projection: { contentHash: 1 } });
+          const tombId = `tomb_${randomUUID()}`;
+          await this.tombstones.insertOne({
+            _id: tombId, tenantId: p.tenantId, targetId: id, contentHash: doc?.contentHash,
+            requestedBy: p.id, reason, createdAtMs: this.clock.nowMs(),
+            closure: { derivedIds: ids.filter((x) => x !== id), status: "verified" },
+          }, { session });
+          await this.memories.deleteOne({ _id: id, tenantId: p.tenantId }, { session });
+          tombstoneIds.push(tombId);
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+    return { tombstoneIds };
+  }
+
+  // Cleanup/status flip only; the read-time gate (expiresAtMs) never depends on this running.
+  async expireDue(nowMs: number): Promise<string[]> {
+    const due = await this.memories.find({ status: "active", expiresAtMs: { $lte: nowMs } }, { projection: { _id: 1 } }).toArray();
+    const ids = due.map((d) => d._id as string);
+    if (ids.length) await this.memories.updateMany({ _id: { $in: ids }, status: "active" }, { $set: { status: "expired" } });
+    return ids;
+  }
+
+  // After any restore/import: re-delete anything a tombstone says must stay gone (G14).
+  async replayTombstones(): Promise<number> {
+    let removed = 0;
+    for await (const t of this.tombstones.find({})) {
+      const or: object[] = [{ _id: t.targetId }];
+      if (t.contentHash) or.push({ contentHash: t.contentHash });
+      removed += (await this.memories.deleteMany({ tenantId: t.tenantId, $or: or })).deletedCount;
+    }
+    return removed;
+  }
+}
