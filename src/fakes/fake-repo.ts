@@ -39,8 +39,8 @@ export class FakeMemoryRepo implements MemoryRepo {
     if (doc.tenantId !== p.tenantId) throw new Error("tenant mismatch");
     if (this.blockedByTombstone(p.tenantId, doc._id, doc.contentHash)) throw new Error("tombstoned");
     if (this.docs.has(this.key(p.tenantId, doc._id))) throw new Error("duplicate id");
-    const dup = this.tenantDocs(p).some((d) => d.claimKey === doc.claimKey && d.version === doc.version);
-    if (dup) throw new Error("duplicate (tenantId, claimKey, version)");
+    const dup = this.tenantDocs(p).some((d) => d.scopeId === doc.scopeId && d.claimKey === doc.claimKey && d.version === doc.version);
+    if (dup) throw new Error("duplicate (tenantId, scopeId, claimKey, version)");
   }
 
   async insert(p: Principal, doc: Memory): Promise<void> {
