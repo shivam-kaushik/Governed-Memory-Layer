@@ -2,6 +2,7 @@ import { MongoClient, type Db } from "mongodb";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 import { randomUUID } from "node:crypto";
 import "dotenv/config";
+import "../../src/db/dns.js";
 import type { Memory, Principal } from "../../src/contracts/contracts.js";
 import { EMBEDDING_DIMS, EMBEDDING_MODEL } from "../../src/contracts/contracts.js";
 

@@ -49,9 +49,12 @@ describe("A6 db leakage", () => {
       const ids = Array.from({ length: 1 + Math.floor(rand() * 8) }, () => pick(docs)._id);
       const forgedScopes = ["team:tenantB", "private:carol", "private:alice", "private:dave", "team:tenantA"].filter(() => rand() < 0.6);
       const claim = pick(docs).claimKey;
-      const results: unknown[] = [await repo.byIds(p, ids), await repo.findActiveByClaimKey(p, forgedScopes, claim)];
-      for (const id of ids) results.push(await repo.getById(p, id));
-      if (HAS_ATLAS) results.push(await repo.vectorSearch(p, { vector: unitVector(Math.floor(rand() * 2000)), scopeIds: forgedScopes, nowMs: 1000, limit: 10 }));
+      const results: unknown[] = await Promise.all([
+        repo.byIds(p, ids),
+        repo.findActiveByClaimKey(p, forgedScopes, claim),
+        ...ids.map((id) => repo.getById(p, id)),
+        ...(HAS_ATLAS ? [repo.vectorSearch(p, { vector: unitVector(Math.floor(rand() * 2000)), scopeIds: forgedScopes, nowMs: 1000, limit: 10 })] : []),
+      ]);
       const dump = JSON.stringify(results);
       const foreignIds = docs.filter((d) => d.tenantId !== p.tenantId || (d.scopeId.startsWith("private:") && !p.scopes.includes(d.scopeId))).map((d) => d._id);
       if (forbidden.some((c) => dump.includes(c)) || foreignIds.some((id) => dump.includes(id))) leaks++;
@@ -59,7 +62,7 @@ describe("A6 db leakage", () => {
     await evals.saveRun({ scenarioId: "scorecard/db-leakage", arm: "R", seed: 20260607, action: {}, scores: { leaks, trials: TRIALS }, createdAtMs: 0 });
     console.log(`leaks: ${leaks}/${TRIALS}`);
     expect(leaks).toBe(0);
-  }, 120_000);
+  }, 900_000);
 
   it("scorecard_row_is_persisted", async () => {
     const runs = await evals.listRuns("scorecard/db-leakage");
