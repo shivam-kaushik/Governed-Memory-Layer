@@ -3,6 +3,14 @@ import { useEffect, useState } from "react";
 import { readSession, SESSION_EVENT } from "./session-cookie";
 
 type Json = Record<string, unknown>;
+export interface Step {
+  kind: string;
+  title: string;
+  detail: string;
+  tone: "ok" | "warn" | "bad" | "info";
+  ids?: string[];
+  rejected?: { id: string; reason: string }[];
+}
 interface Turn {
   action: { tool: string; args: Json; usedMemoryIds: string[] };
   result: { fixed: boolean; rejected?: string; findings?: string };
@@ -10,12 +18,14 @@ interface Turn {
   explanation?: string;
   learnedId?: string;
   forgotten?: string[];
+  steps?: Step[];
   cards?: { memoryId: string; version: number; statement: string; confidence: number; sourceAuthority: number; score: number }[];
 }
 export interface Reply {
   brain: string;
   fixed: boolean;
   turns: Turn[];
+  alert?: { service: string; version: string; environment: string };
 }
 interface Msg {
   from: "you" | "agent";
@@ -24,43 +34,64 @@ interface Msg {
   error?: boolean;
 }
 
+const short = (id: string) => (id.length > 14 ? `${id.slice(0, 12)}…` : id);
+
+// Replays the recorded trace one step at a time. Ids and reason codes only; memory text lives in the evidence list below.
+function Timeline({ steps, base }: { steps: Step[]; base: number }) {
+  return (
+    <ol className="tl">
+      {steps.map((st, i) => (
+        <li key={st.kind} className={`tl-step tone-${st.tone}`} style={{ animationDelay: `${(base + i) * 0.45}s` }}>
+          <span className="dot" aria-hidden />
+          <div>
+            <strong>{st.title}</strong> <span className="tl-detail">{st.detail}</span>
+            {st.ids && st.ids.length > 0 && (
+              <div className="tl-ids">
+                {st.ids.map((id) => <span key={id} className={`pill pill-${st.kind === "memory" ? (st.tone === "warn" ? "forgot" : "saved") : "used"}`} title={id}>{st.kind === "memory" ? (st.tone === "warn" ? "forgot " : "saved ") : st.kind === "decision" ? "used " : "kept "}{short(id)}</span>)}
+              </div>
+            )}
+            {st.rejected && st.rejected.length > 0 && (
+              <div className="tl-ids">
+                {st.rejected.map((r) => <span key={r.id} className="pill pill-rej" title={r.id}>{r.reason} {short(r.id)}</span>)}
+              </div>
+            )}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export function AgentReply({ reply }: { reply: Reply }) {
+  const last = reply.turns.at(-1);
   return (
     <>
-                <span> {reply.fixed ? "Incident fixed." : "Not fixed, escalate."} (brain: {reply.brain})</span>
-                <ol className="turns">
-                  {reply.turns.map((t) => (
-                    <li key={t.traceId}>
-                      <div className="step"><span className="steplabel">1 · Memory recalled</span>
-                        {t.cards && t.cards.length > 0 ? (
-                          t.cards.map((c) => (
-                            <div key={c.memoryId} className="evidence">
-                              {c.statement}
-                              <div><small className="mono">{c.memoryId} v{c.version}</small> <small>· confidence {c.confidence} · authority {c.sourceAuthority} · match {c.score.toFixed(2)}</small></div>
-                            </div>
-                          ))
-                        ) : <em> nothing eligible: no precedent, expired, wrong version or out of scope</em>}
-                      </div>
-                      <div className="step"><span className="steplabel">2 · Action chosen</span>
-                        <strong>{t.action.tool}</strong> <span className="mono">{JSON.stringify(t.action.args)}</span>
-                        {t.action.usedMemoryIds.length > 0 ? <div><small>used memory: <span className="mono">{t.action.usedMemoryIds.join(", ")}</span></small></div> : <div><small>used memory: none</small></div>}
-                        {t.explanation && <div><em>{t.explanation}</em></div>}
-                      </div>
-                      <div className="step"><span className="steplabel">3 · Tool result</span>
-                        {t.result.rejected ? <span className="bad">BLOCKED by guard: {t.result.rejected}</span> : t.result.fixed ? <span className="ok">incident fixed</span> : <span>executed, not fixed yet</span>}
-                        {t.result.findings && <div>Finding: {t.result.findings}</div>}
-                        {t.learnedId && <div>Saved to memory: <span className="mono">{t.learnedId}</span></div>}
-                        {t.forgotten && t.forgotten.length > 0 && <div>Forgot proven-wrong memory: <span className="mono">{t.forgotten.join(", ")}</span></div>}
-                      </div>
-                      <small>trace <span className="mono">{t.traceId}</span> (see the Monitor tab)</small>
-                    </li>
-                  ))}
-                </ol>
+      {last?.explanation && <p className="said">{last.explanation}</p>}
+      <p className="tl-head">{reply.fixed ? <span className="ok">Incident fixed.</span> : "Not fixed yet."} <small>brain: {reply.brain}{reply.alert ? ` · ${reply.alert.service} ${reply.alert.version} ${reply.alert.environment}` : ""}</small></p>
+      {reply.turns.map((t, ti) => (
+        <div key={t.traceId} className="turn">
+          {reply.turns.length > 1 && <span className="steplabel">Attempt {ti + 1}</span>}
+          {t.steps && <Timeline steps={t.steps} base={ti * 6} />}
+          {t.cards && t.cards.length > 0 && (
+            <details className="evidence-box">
+              <summary>Memory the agent read ({t.cards.length})</summary>
+              {t.cards.map((c) => (
+                <div key={c.memoryId} className="evidence">
+                  {c.statement}
+                  <div><small className="mono">{c.memoryId} v{c.version}</small> <small>· confidence {c.confidence} · authority {c.sourceAuthority} · match {c.score.toFixed(2)}</small></div>
+                </div>
+              ))}
+            </details>
+          )}
+          {t.result.findings && <div className="step"><span className="steplabel">Tool finding</span>{t.result.findings}</div>}
+          <small>trace <span className="mono">{t.traceId}</span> (full event log in Monitor)</small>
+        </div>
+      ))}
     </>
   );
 }
 
-const EXAMPLES = ["charging sessions failing with 5xx on session-service 3.2.1 in prod after deploy", "charging sessions failing with 5xx on roaming-service 1.4.0 in prod after deploy"];
+const EXAMPLES = ["charging sessions failing with 5xx on session-service 3.2.1 in prod after deploy", "charging sessions failing with 5xx on roaming-service 1.4.0 in prod after deploy", "that did not work, what else can we try?"];
 
 interface Chat { id: string; title: string; msgs: Msg[] }
 const fresh = (): Chat => ({ id: crypto.randomUUID(), title: "New chat", msgs: [] });
@@ -121,13 +152,16 @@ export function ChatPanel() {
   const send = async (message: string) => {
     if (!message.trim() || busy) return;
     const id = activeId;
+    // Follow-ups reuse the service/version the last reply in this chat worked on.
+    const prior = [...(chats.find((c) => c.id === id)?.msgs ?? [])].reverse().find((m) => m.reply?.alert && m.reply.alert.service !== "unknown-service")?.reply?.alert;
+    const context = prior ? { service: prior.service, version: prior.version, environment: prior.environment } : undefined;
     setBusy(true);
     add(id, { from: "you", text: message });
     setText("");
     try {
-      const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }) });
+      const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message, ...(context ? { context } : {}) }) });
       const j = (await r.json()) as Json;
-      const fail = r.status === 401 ? "Pick a session in the sidebar first." : j["error"] === "INVALID_ALERT" ? "Include a service (e.g. checkout-service) and a version (e.g. 2.3.1)." : `Error: ${String(j["error"])}`;
+      const fail = r.status === 401 ? "Pick a session in the sidebar first." : `Error: ${String(j["error"])}`;
       add(id, r.ok ? { from: "agent", reply: j as unknown as Reply } : { from: "agent", text: fail, error: true });
     } catch {
       add(id, { from: "agent", text: "Request failed.", error: true });
@@ -162,10 +196,11 @@ export function ChatPanel() {
               {m.reply && <AgentReply reply={m.reply} />}
             </div>
           ))}
+          {busy && <div className="msg working" aria-live="polite"><span className="who">Agent</span><span className="shimmer">Reading your message, searching memory, deciding…</span></div>}
         </div>
       )}
       <form className="composer" onSubmit={(e) => { e.preventDefault(); void send(text); }}>
-        <input aria-label="Describe an incident" value={text} onChange={(e) => setText(e.target.value)} placeholder="charging sessions failing with 5xx on session-service 3.2.1 in prod" maxLength={1000} />
+        <input aria-label="Describe an incident" value={text} onChange={(e) => setText(e.target.value)} placeholder="Describe the incident, or just ask. e.g. charging sessions failing with 5xx on session-service 3.2.1" maxLength={1000} />
         <button className="send" type="submit" disabled={busy || !text.trim()}>{busy ? "Working..." : "Send"}</button>
       </form>
     </section>

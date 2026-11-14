@@ -3,7 +3,8 @@ import type { Caller, Memory, Principal } from "../contracts/contracts";
 import { GovernanceError } from "../core/errors";
 import { resolvePrincipal } from "../core/identity";
 import { authorize } from "../core/policy";
-import { parseAlertMessage } from "./chat";
+import { parseChatMessage } from "./chat";
+import { buildSteps } from "./timeline";
 import type { ApiContext, ApiRequest, ApiResponse } from "./ports";
 
 // Purpose is fixed server-side. Nothing in a request can choose it (G1).
@@ -23,7 +24,10 @@ const correctBody = z.object({
   confidence: z.number().min(0).max(1).optional(),
 });
 const forgetBody = z.object({ id, reason });
-const chatBody = z.object({ message: z.string().min(1).max(1000) });
+const chatBody = z.object({
+  message: z.string().min(1).max(1000),
+  context: z.object({ service: z.string().max(80), version: z.string().max(20), environment: z.string().max(20) }).optional(),
+});
 const judgeBody = z.object({ id: id.optional() });
 const JUDGE_ACTIONS = "isolation|expiry-start|expiry-check|correct|forget|behavior|drift|reset";
 const runBody = z.object({ alertId: z.string().min(1).max(128) });
@@ -203,8 +207,16 @@ const ROUTES: Route[] = [
       POST: async (c, p, caller, req) => {
         const b = chatBody.safeParse(req.body);
         if (!b.success) return res(400, { error: "INVALID_INPUT" });
-        const alert = parseAlertMessage(b.data.message);
-        return alert ? res(200, await c.runLive(p, caller.sessionToken, alert)) : res(400, { error: "INVALID_ALERT" });
+        const { alert, inferred } = parseChatMessage(b.data.message, b.data.context);
+        const run = await c.runLive(p, caller.sessionToken, alert);
+        const steps = async (traceId: string) => {
+          const events = await c.trace.listByTrace(p, traceId);
+          const recallId = events.find((e) => e.step === "recall_result")?.payload["recallTraceId"];
+          const rejected = (await c.reads.listAudit(p, 200)).find((a) => a.op === "recall" && a.traceId === recallId)?.rejectedIds ?? [];
+          return buildSteps(events, rejected, inferred);
+        };
+        const turns = run.turns ? await Promise.all((run.turns as { traceId: string }[]).map(async (t) => ({ ...t, steps: await steps(t.traceId) }))) : undefined;
+        return res(200, { ...run, ...(turns ? { turns } : {}), steps: await steps(run.traceId), alert: { service: alert.service, version: alert.version, environment: alert.environment } });
       },
     },
   },

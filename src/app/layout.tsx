@@ -41,6 +41,15 @@ pre{background:#f0f1f7;padding:.6rem;overflow:auto;border-radius:8px}.err,.bad{c
 .composer{position:sticky;bottom:1rem;display:flex;gap:.5rem;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:.5rem;box-shadow:0 8px 30px rgba(20,21,31,.08)}
 .composer input{flex:1;border:0;background:none;font:inherit;padding:.5rem .6rem;min-width:0}.composer input:focus-visible{outline:0}.composer:focus-within{border-color:var(--accent)}
 .chatbar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-bottom:.5rem}.chip.on{background:#ece9ff;border-color:var(--accent)}
+.tl{list-style:none;margin:.4rem 0;padding:0 0 0 .3rem;border-left:2px solid var(--line)}.tl-step{display:flex;gap:.6rem;margin:.5rem 0 .5rem -.45rem;opacity:0;animation:tlin .4s ease forwards}
+.dot{flex:none;width:10px;height:10px;border-radius:50%;margin-top:.45rem;background:var(--mute);box-shadow:0 0 0 3px var(--panel)}
+.tone-ok .dot{background:#16a34a}.tone-warn .dot{background:#f59e0b}.tone-bad .dot{background:#dc2626}.tone-info .dot{background:var(--accent)}
+.tl-detail{color:var(--mute)}.tl-ids{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.25rem}.pill{font:600 11.5px ui-monospace,Menlo,monospace;padding:.1rem .5rem;border-radius:999px;background:#eceef6}
+.pill-used{background:#d9f5e5;color:#0d6236}.pill-saved{background:#e0e8fd;color:#1c3f8a}.pill-forgot{background:#eadffa;color:#4a2a7a}.pill-rej{background:#fde0e4;color:#8a1328}
+.said{margin:.2rem 0 .4rem}.tl-head{margin:.2rem 0}.turn{margin:.4rem 0}.evidence-box{margin:.3rem 0}.evidence-box summary{cursor:pointer;color:var(--mute);font-size:13px}
+.working{opacity:.9}.shimmer{background:linear-gradient(90deg,var(--mute),var(--accent),var(--mute));background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shim 1.6s linear infinite}
+@keyframes tlin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}@keyframes shim{to{background-position:-200% 0}}
+@media(prefers-reduced-motion:reduce){.tl-step{animation:none;opacity:1}.shimmer{animation:none;color:var(--mute)}}
 .send{padding:.5rem 1.1rem;font-weight:600}`;
 
 export default async function Layout({ children }: { children: ReactNode }) {
