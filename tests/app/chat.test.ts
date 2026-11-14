@@ -64,11 +64,10 @@ describe("POST /api/chat", () => {
     expect(Object.keys(seen!.alert).sort()).toEqual(["environment", "id", "service", "symptom", "text", "version"]);
   });
 
-  it("rejects_message_that_is_not_an_alert", async () => {
+  // Plan conflict flagged: free chat replaced the INVALID_ALERT rule on user request; see chat-free.test.ts.
+  it("message_without_service_or_version_is_still_answered", async () => {
     const w = await apiWorld();
-    const r = await w.call("POST", "/api/chat", A_RESP, { message: "hello there" });
-    expect(r.status).toBe(400);
-    expect((r.json as J).error).toBe("INVALID_ALERT");
+    expect((await w.call("POST", "/api/chat", A_RESP, { message: "hello there" })).status).toBe(200);
   });
 
   it("rejects_missing_empty_or_oversized_message", async () => {
