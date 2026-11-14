@@ -6,7 +6,7 @@ The demo agent triages service alerts (for example, a 5xx spike caused by a satu
 
 Full diagrams (8, with sequences and component tables): open [`docs/architecture-diagrams.html`](docs/architecture-diagrams.html) in a browser.
 
-Videos: a 1 minute narrated app demo and a 3 minute explainer. See [Videos](#videos).
+Demo videos: a 1 minute and a 3 minute walkthrough. See [Demo videos](#demo-videos).
 
 ## How it works
 
@@ -114,27 +114,22 @@ npm run dev               # dashboard at http://localhost:3000
 
 Embeddings run locally (`@xenova/transformers`), so no outside service sees memory text. The model downloads on first use.
 
-## Videos
+## Demo videos
 
-Two videos live in [`video/`](video), a separate [Remotion](https://www.remotion.dev) project with its own `package.json`. Rendered files go to `video/out/`, which git ignores, so render them yourself.
+Both videos were generated with AI tools. Click a preview to watch on YouTube.
 
-| Video | Length | What it shows |
-|---|---|---|
-| `AppDemo60` | about 1 min | The running app with a voiceover: tech stack, live chat, and how each part answers the three questions. Screens are real recordings of the app, and the Proofs numbers come from the app's own Proofs page. |
-| `GovernedMemoryDemo` | about 3 min 12 s | Animated explainer, no voiceover: what the project is, the architecture, and a detailed walkthrough of how it answers each question. |
+**Short demo (about 1 min).** The running app with a voiceover: tech stack, live chat, and how each part answers the three questions.
 
-```bash
-cd video
-npm install
-npm run dev                                              # Remotion Studio preview, pick a composition in the sidebar
-npx remotion render AppDemo60 out/app-demo-60.mp4
-npx remotion render GovernedMemoryDemo out/governed-memory-explainer.mp4
-```
+[![AI Demo | MongoDB Hackathon](https://img.youtube.com/vi/xOWCk7wjgU8/maxresdefault.jpg)](https://youtu.be/xOWCk7wjgU8)
+
+**Detailed demo (about 3 min).** An animated walkthrough of what the project is, the architecture, and how it answers each question in depth.
+
+[![AI Demo | Mongo Hackathon | Detailed](https://img.youtube.com/vi/WvUPCApNzdU/maxresdefault.jpg)](https://youtu.be/WvUPCApNzdU)
 
 Notes:
-- The voiceover files are in `video/public/vo/`, made with the local macOS `say` voice (Samantha), so no text left the machine.
-- The app clips are in `video/public/clips/`. They were recorded from the app running on `http://localhost:3000` in demo mode, signed in as the seeded demo users. Re-record them if the UI changes.
-- The proof numbers in the 1 minute video were produced by the deterministic rule brain over 20 seeds. They prove plumbing and governance, not model behavior.
+- The short demo's voiceover uses a local text-to-speech voice, so no text left the machine.
+- The app screens in the short demo are real recordings of the app running in demo mode with the seeded demo users.
+- The proof numbers shown in the short demo came from the deterministic rule brain over 20 seeds. They prove plumbing and governance, not model behavior.
 
 ## Commands
 
@@ -158,7 +153,7 @@ Notes:
 | `src/contracts` | Shared types between app and storage |
 | `tests` | core, agent, proof, db, security, app |
 | `docs` | Diagrams, demo script, handoff notes |
-| `video` | Remotion project for the 1 minute demo and the 3 minute explainer |
+| `video` | Source for the two demo videos |
 
 ## Honest limits
 
