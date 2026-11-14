@@ -40,7 +40,11 @@ export async function buildWorld(kind: ScenarioKind, seed = 1, trace: FakeTraceS
   for (const id of scenario.forgetIds) await layer.forget(id, "test", caller("tok-a-rev"));
 
   const simulator: ToolSimulator = makeSimulator(scenario.nonce);
-  const run = (brain: AgentBrain = ruleBrain, sim: ToolSimulator = simulator) =>
-    runTriage(scenario.alert, caller("tok-a-resp"), layer, brain, trace, clock, { principal: scenario.actor, simulator: sim, newId });
+  const run = (brain: AgentBrain = ruleBrain, sim: ToolSimulator = simulator, who: "a" | "b" = "a") =>
+    runTriage(scenario.alert, caller(who === "a" ? "tok-a-resp" : "tok-b-resp"), layer, brain, trace, clock, {
+      principal: who === "a" ? scenario.actor : teamBResponder,
+      simulator: sim,
+      newId,
+    });
   return { scenario, repo, clock, audit, trace, layer, simulator, deps, run, actor: scenario.actor };
 }

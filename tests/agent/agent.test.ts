@@ -23,7 +23,13 @@ type World = Awaited<ReturnType<typeof buildWorld>>;
 const events = (w: World, traceId: string) => w.trace.listByTrace(w.actor, traceId);
 const stepOf = (evs: TraceEvent[], step: TraceStep) => evs.find((e) => e.step === step);
 const spy = (w: World) => {
-  const s = { calls: 0, run: (a: Action) => (s.calls++, w.simulator.run(a)) } satisfies ToolSimulator & { calls: number };
+  const s: ToolSimulator & { calls: number } = {
+    calls: 0,
+    run: (a: Action) => {
+      s.calls++;
+      return w.simulator.run(a);
+    },
+  };
   return s;
 };
 const brainReturning = (a: unknown): AgentBrain => ({ decide: async () => a as Action });
@@ -220,6 +226,16 @@ describe("trace events (G23, G24, G25)", () => {
     expect(dump).not.toContain("restart cache pool"); // memory text
     expect(dump).not.toContain(w.scenario.alert.text); // alert text
     expect(dump).not.toContain(w.scenario.nonce); // arg values: hash only
+  });
+
+  it("trace tenancy comes from the principal: team B's run is invisible to team A", async () => {
+    const w = await buildWorld("valid_fix");
+    const r = await w.run(ruleBrain, w.simulator, "b");
+    const asB = await w.trace.listByTrace(w.scenario.principals.teamBResponder, r.traceId);
+    expect(asB.length).toBe(STEPS.length);
+    expect(asB.every((e) => e.tenantId === "tenant-b" && e.principalId === "b-resp")).toBe(true);
+    expect(await events(w, r.traceId)).toEqual([]); // team A principal sees nothing
+    expect(r.action.tool).toBe("investigate"); // tenant-a's fix is not recalled for tenant b
   });
 
   it("a rejected action still closes the trace, with no tool_executed", async () => {
