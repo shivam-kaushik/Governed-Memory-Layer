@@ -8,6 +8,7 @@ import { buildWorld } from "../eval/world";
 import { FakeEvalStore } from "../fakes/fake-eval-store";
 import { createApi } from "./api";
 import { createAutonomy } from "./autonomy";
+import { voyageFromEnv } from "../core/voyage";
 import { notifierFromEnv } from "./notify";
 import type { ApiContext, ApiRequest, ApiResponse } from "./ports";
 
@@ -35,6 +36,8 @@ export async function buildDemoServer(
   // GML_WORLD=no_precedent starts with empty memory so the agent has to learn.
   const kind = SCENARIO_KINDS.find((k) => k === env["GML_WORLD"]) ?? ("valid_fix" as ScenarioKind);
   const w = await buildWorld(kind, 1);
+  const reranker = voyageFromEnv(env, opts.fetch);
+  if (reranker) w.deps.reranker = reranker; // ranking only; eligibility is decided before it
   // The model is used only when a key is configured; the label always says which brain decided.
   const apiKey = env["ANTHROPIC_API_KEY"];
   const model = env["GML_MODEL"] ?? DEFAULT_MODEL;

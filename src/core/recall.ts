@@ -74,6 +74,15 @@ export async function recall(deps: CoreDeps, input: unknown, caller: Caller): Pr
     ranked.push({ doc, score });
   }
 
+  if (deps.reranker && ranked.length > 1) {
+    // Only recheck-passed memories reach the reranker; it can reorder them but never admit another.
+    const rel = await deps.reranker(q.text, ranked.map((r) => r.doc.text)).catch(() => null);
+    if (rel && rel.length === ranked.length) {
+      ranked.forEach((r, i) => {
+        r.score = rerankScore({ sim: clamp01(rel[i] ?? 0), confidence: r.doc.confidence, authority: r.doc.sourceAuthority, recency: recencyScore(now - r.doc.createdAtMs) });
+      });
+    }
+  }
   ranked.sort((a, b) => b.score - a.score || a.doc._id.localeCompare(b.doc._id));
   const cards: EvidenceCard[] = ranked.slice(0, limit).map(({ doc, score }) => ({
     memoryId: doc._id,
