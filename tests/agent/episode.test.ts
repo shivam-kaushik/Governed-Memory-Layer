@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentBrain } from "../../src/agent/brain-rules";
+import type { Action } from "../../src/contracts/contracts";
 import { runEpisode } from "../../src/agent/episode";
 import { makeSimulator, withFindings } from "../../src/agent/tools";
 import { runTriage } from "../../src/agent/triage-agent";
@@ -15,8 +16,8 @@ const scriptedAgent: AgentBrain = {
     const mem = cards.find((c) => c.value.action === "restart_cache_pool");
     if (mem) return { action: { tool: "restart_cache_pool", args: { pool: String(mem.value.pool) }, usedMemoryIds: [mem.memoryId] }, rationale: { rule: "llm_decision", evidenceIds: [mem.memoryId] } };
     const pool = notes.join(" ").match(/cp-[0-9a-f]{6}/)?.[0];
-    if (pool) return { action: { tool: "restart_cache_pool", args: { pool }, usedMemoryIds: [] }, rationale: { rule: "llm_decision", evidenceIds: [] } };
-    return { action: { tool: "investigate", args: {}, usedMemoryIds: [] }, rationale: { rule: "llm_decision", evidenceIds: [] } };
+    const action: Action = pool ? { tool: "restart_cache_pool", args: { pool }, usedMemoryIds: [] } : { tool: "investigate", args: {}, usedMemoryIds: [] };
+    return { action, rationale: { rule: "llm_decision", evidenceIds: [] } };
   },
 };
 

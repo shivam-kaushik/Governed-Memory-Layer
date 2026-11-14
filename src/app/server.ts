@@ -1,5 +1,8 @@
-import { ruleBrain } from "../agent/brain-rules";
-import { runTriage } from "../agent/triage-agent";
+import { ruleBrain, type AgentBrain } from "../agent/brain-rules";
+import { runEpisode } from "../agent/episode";
+import { createLlmBrain, DEFAULT_MODEL } from "../agent/llm-brain";
+import { SCENARIO_KINDS, type ScenarioKind } from "../agent/scenarios";
+import { withFindings } from "../agent/tools";
 import { runProof, type ProofReport } from "../eval/run";
 import { buildWorld } from "../eval/world";
 import { FakeEvalStore } from "../fakes/fake-eval-store";
@@ -21,9 +24,20 @@ export interface DemoServer {
 
 // Fake-backed composition root. Swap to Person A's Mongo stores here at integration.
 // Demo mode (GML_DEMO=1) is the only way the clock route and the session picker exist.
-export async function buildDemoServer(env: Record<string, string | undefined> = process.env): Promise<DemoServer> {
+export async function buildDemoServer(
+  env: Record<string, string | undefined> = process.env,
+  opts: { fetch?: typeof fetch } = {},
+): Promise<DemoServer> {
   const demoMode = env["GML_DEMO"] === "1";
-  const w = await buildWorld("valid_fix", 1);
+  // GML_WORLD=no_precedent starts with empty memory so the agent has to learn.
+  const kind = SCENARIO_KINDS.find((k) => k === env["GML_WORLD"]) ?? ("valid_fix" as ScenarioKind);
+  const w = await buildWorld(kind, 1);
+  // The model is used only when a key is configured; the label always says which brain decided.
+  const apiKey = env["ANTHROPIC_API_KEY"];
+  const model = env["GML_MODEL"] ?? DEFAULT_MODEL;
+  const brain: AgentBrain = apiKey ? createLlmBrain({ apiKey, model, ...(opts.fetch ? { fetch: opts.fetch } : {}) }) : ruleBrain;
+  const brainName = apiKey ? `llm:${model}` : "rule-brain";
+  const simulator = withFindings(w.simulator, w.scenario.nonce);
   let proof: Promise<ProofReport> | undefined;
   const ctx: ApiContext = {
     resolver: w.deps.resolvePrincipal,
@@ -34,12 +48,13 @@ export async function buildDemoServer(env: Record<string, string | undefined> = 
     clock: w.clock,
     alerts: [w.scenario.alert],
     runLive: async (principal, sessionToken, alert) => {
-      const o = await runTriage(alert, { sessionToken, purpose: "incident-triage" }, w.layer, ruleBrain, w.trace, w.clock, {
+      const e = await runEpisode(alert, { sessionToken, purpose: "incident-triage" }, w.layer, brain, w.trace, w.clock, {
         principal,
-        simulator: w.simulator,
+        simulator,
         newId: w.deps.newId,
       });
-      return { action: o.action, result: o.result, traceId: o.traceId, traceComplete: o.traceComplete };
+      const last = e.turns[e.turns.length - 1]!;
+      return { action: last.action, result: last.result, traceId: last.traceId, traceComplete: last.traceComplete, brain: brainName, fixed: e.fixed, turns: e.turns };
     },
     // Cached: the proof is deterministic, so one run serves every request.
     proofReport: () => (proof ??= runProof(PROOF_SEEDS, ruleBrain, { brainName: "rule-brain" })),

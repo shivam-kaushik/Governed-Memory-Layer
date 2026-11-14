@@ -19,6 +19,7 @@ export default async function Layout({ children }: { children: ReactNode }) {
         <nav>
           <strong>Governed Memory Layer</strong>
           <a href="/">Live</a>
+          <a href="/monitor">Monitor</a>
           <a href="/memories">Memories</a>
           <a href="/audit">Audit</a>
           <a href="/proof">Proof</a>

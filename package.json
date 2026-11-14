@@ -5,7 +5,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "dev": "GML_DEMO=1 next dev",
+    "dev": "GML_DEMO=1 GML_WORLD=no_precedent next dev",
     "build": "next build"
   },
   "dependencies": {

@@ -23,6 +23,9 @@ const correctBody = z.object({
 });
 const forgetBody = z.object({ id, reason });
 const runBody = z.object({ alertId: z.string().min(1).max(128) });
+const sinceQuery = z.coerce.number().int().min(0);
+const MONITOR_WINDOW_MS = 3_600_000;
+const EVENT_CAP = 500;
 const clockBody = z.object({ op: z.enum(["advance_day", "jump_to_expiry"]) });
 
 const res = (status: number, json: unknown): ApiResponse => ({ status, json });
@@ -120,6 +123,26 @@ const ROUTES: Route[] = [
         return events.length ? res(200, { events }) : res(404, { error: "NOT_FOUND" });
       },
     },
+  },
+  {
+    re: /^\/api\/monitor\/events$/,
+    methods: {
+      GET: async (c, p, _caller, req) => {
+        const since = sinceQuery.safeParse(req.query?.["since"] ?? "0");
+        if (!since.success) return res(400, { error: "INVALID_INPUT" });
+        const events = [];
+        for await (const e of c.trace.feed(p, since.data)) {
+          if (e.tenantId === p.tenantId) events.push(e);
+          if (events.length >= EVENT_CAP) break;
+        }
+        return res(200, { events });
+      },
+    },
+  },
+  { re: /^\/api\/monitor\/metrics$/, methods: { GET: async (c, p) => res(200, { metrics: await c.trace.metrics(p, MONITOR_WINDOW_MS) }) } },
+  {
+    re: /^\/api\/monitor\/alerts$/,
+    methods: { GET: async (c, p) => res(200, { alerts: (await c.trace.alerts(p, 0)).filter((a) => a.tenantId === p.tenantId) }) },
   },
   { re: /^\/api\/proof$/, methods: { GET: async (c) => res(200, { report: await c.proofReport() }) } },
   { re: /^\/api\/live\/alerts$/, methods: { GET: async (c) => res(200, { alerts: c.alerts }) } },

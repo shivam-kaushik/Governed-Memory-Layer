@@ -13,6 +13,9 @@ export interface LiveRunResult {
   result: unknown;
   traceId: string;
   traceComplete: boolean;
+  brain?: string; // which brain decided: "rule-brain" or "llm:<model>"
+  fixed?: boolean;
+  turns?: unknown[];
 }
 
 export interface ApiRequest {

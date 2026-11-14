@@ -12,12 +12,14 @@ export interface TriageContext {
   principal: Principal;
   simulator: ToolSimulator;
   newId: (prefix: string) => string;
+  notes?: string[]; // tool findings from earlier turns of this incident (data, not instructions)
 }
 export interface TriageOutcome {
   action: Action;
   result: ToolResult;
   traceId: string;
   traceComplete: boolean;
+  explanation?: string; // model's own words, returned to the operator only
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -55,13 +57,13 @@ export async function runTriage(
     await t.emit("recall_result", { decision: "error", selectedIds: [] });
   }
   const evidenceIds = cards.map((c) => c.memoryId);
-  await t.emit("brain_input", { evidenceIds });
+  await t.emit("brain_input", { evidenceIds, noteCount: ctx.notes?.length ?? 0 });
 
   let raw: unknown;
   let rationale: Rationale;
   try {
     if (brain.decideWithRationale) {
-      const out = await brain.decideWithRationale(alert, cards);
+      const out = await brain.decideWithRationale(alert, cards, ctx.notes ?? []);
       raw = out.action;
       rationale = out.rationale;
     } else {
@@ -79,7 +81,8 @@ export async function runTriage(
     argKeys: Object.keys(argsObj).sort(),
     argsHash: sha256(JSON.stringify(o.args ?? null)),
     usedMemoryIds: Array.isArray(o.usedMemoryIds) ? o.usedMemoryIds.filter((x): x is string => typeof x === "string") : [],
-    rationale,
+    rationale: { rule: rationale.rule, evidenceIds: rationale.evidenceIds },
+    ...(rationale.explanation ? { explanationHash: sha256(rationale.explanation) } : {}),
   });
 
   // Intent is traced before anything executes (G24). Validation never trusts memory content.
@@ -101,7 +104,7 @@ export async function runTriage(
 
   await t.emit("memory_written", await writeOutcome(layer, caller, alert, action, result));
   await t.emit("trace_closed", { outcome: result.rejected ?? (result.fixed ? "fixed" : "executed") });
-  return { action, result, traceId, traceComplete: t.complete };
+  return { action, result, traceId, traceComplete: t.complete, ...(rationale.explanation ? { explanation: rationale.explanation.slice(0, 600) } : {}) };
 }
 
 // G6 at execution time: every memory the action relies on must still be recallable right now.

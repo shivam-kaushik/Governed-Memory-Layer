@@ -4,11 +4,12 @@ import { POOL_RE } from "./tools";
 export interface Rationale {
   rule: string;
   evidenceIds: string[];
+  explanation?: string; // free text from a model: shown to the operator, never written to trace or audit
 }
 
 // Brain may also explain itself; the trace records the rationale (ids only).
 export interface AgentBrain extends Brain {
-  decideWithRationale?(alert: Alert, cards: EvidenceCard[]): Promise<{ action: Action; rationale: Rationale }>;
+  decideWithRationale?(alert: Alert, cards: EvidenceCard[], notes?: string[]): Promise<{ action: Action; rationale: Rationale }>;
 }
 
 // Deterministic rule brain. Proves plumbing and governance, not model behavior.

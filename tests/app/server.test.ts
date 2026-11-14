@@ -59,8 +59,8 @@ describe("demo server brain selection and autonomy", () => {
     const f = (async (_u: string, init: RequestInit) => {
       const body = String(init.body);
       bodies.push(body);
-      const pool = body.match(/Notes[\s\S]*?(cp-[0-9a-f]{6})/)?.[1];
-      const mem = body.match(/id=(\S+) v\d[\s\S]*?"pool":"(cp-[0-9a-f]{6})"/);
+      const pool = body.match(/findings>[\s\S]*?(cp-[0-9a-f]{6})/)?.[1];
+      const mem = body.match(/id=(\S+) v\d[\s\S]*?pool\\?":\\?"(cp-[0-9a-f]{6})/);
       const input = mem
         ? { tool: "restart_cache_pool", args: { pool: mem[2] }, usedMemoryIds: [mem[1]], explanation: "known fix" }
         : pool
@@ -70,7 +70,7 @@ describe("demo server brain selection and autonomy", () => {
     }) as unknown as typeof fetch;
     return { f, bodies };
   };
-  type Run = { brain: string; turns: { action: { tool: string }; explanation?: string }[]; fixed: boolean };
+  type Run = { brain: string; turns: { action: { tool: string; usedMemoryIds: string[] }; explanation?: string }[]; fixed: boolean };
 
   it("without_api_key_brain_is_labeled_rule_brain", async () => {
     const s = await buildDemoServer({ GML_DEMO: "1" });
@@ -90,6 +90,7 @@ describe("demo server brain selection and autonomy", () => {
     const two = (await post(s, "/api/live/run", "tok-a-resp", { alertId: "alert-1" })).json as Run;
     expect(two.turns.map((t) => t.action.tool)).toEqual(["restart_cache_pool"]);
     expect(two.turns[0]!.explanation).toBe("known fix");
+    expect(two.turns[0]!.action.usedMemoryIds).toHaveLength(1);
   });
 
   it("team_b_agent_cannot_use_team_a_learned_memory", async () => {

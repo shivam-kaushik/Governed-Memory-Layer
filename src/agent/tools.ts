@@ -12,6 +12,7 @@ export interface ToolResult {
   executed: boolean;
   fixed: boolean;
   rejected?: GuardReason;
+  findings?: string; // tool output the agent may read next turn; untrusted data, never traced
 }
 
 export interface ToolSimulator {
@@ -58,6 +59,18 @@ export function makeSimulator(truePool: string): ToolSimulator {
         default:
           return { executed: false, fixed: false, rejected: "TOOL_NOT_ALLOWED" };
       }
+    },
+  };
+}
+
+// Demo variant: investigating surfaces the failing pool (like reading logs). Other tools are unchanged.
+export function withFindings(base: ToolSimulator, truePool: string): ToolSimulator {
+  return {
+    run(action) {
+      const r = base.run(action);
+      return action.tool === "investigate" && r.executed
+        ? { ...r, findings: `Logs: cache pool ${truePool} is saturated, connection timeouts behind the 5xx spike.` }
+        : r;
     },
   };
 }

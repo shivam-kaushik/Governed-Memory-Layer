@@ -50,7 +50,17 @@ export class FakeTraceStore implements TraceStore {
     };
   }
 
-  async alerts(_p: Principal, _sinceMs: number): Promise<MonitorAlert[]> {
-    return []; // shortcut: alert worker is a cut-list item
+  // shortcut: only guard rejections are detected (ids and reason codes alone cannot show adoption of bad memory); alert worker is a cut-list item.
+  async alerts(p: Principal, sinceMs: number): Promise<MonitorAlert[]> {
+    return this.events
+      .filter((e) => e.tenantId === p.tenantId && e.createdAtMs >= sinceMs && e.step === "tool_validation" && e.payload.valid === false)
+      .map((e) => ({
+        kind: "tool_guard_rejected" as const,
+        traceId: e.traceId,
+        tenantId: e.tenantId,
+        createdAtMs: e.createdAtMs,
+        detail: Array.isArray(e.payload.reasons) ? e.payload.reasons.map(String).join(",") : "",
+      }))
+      .reverse();
   }
 }
