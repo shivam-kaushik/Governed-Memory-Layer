@@ -12,6 +12,12 @@ export function derivedQuery(p: Principal, id: string) {
   return { filter: { tenantId: p.tenantId, derivedFrom: id }, hint: "derivedFrom_1" };
 }
 
+// TTL cleanup runs on real wall-clock time, so purgeAt is anchored to the system clock even when the
+// logical Clock (demo clock jumps, fake clocks in tests) is far behind: cleanup must never delete a live memory.
+export function purgeAtFor(expiresAtMs: number): Date {
+  return new Date(Math.max(expiresAtMs, systemClock.nowMs()) + PURGE_GRACE_MS);
+}
+
 export const NUM_CANDIDATES = 200;
 
 // Trusted prefilter (plan 4.4): built only from the Principal and server-resolved scopes/time.
@@ -48,7 +54,7 @@ export class MongoMemoryRepo implements MemoryRepo {
 
   async insert(p: Principal, doc: Memory): Promise<void> {
     if (await this.isTombstoned(p, doc._id, doc.contentHash)) throw new Error("TOMBSTONED: id or content was forgotten");
-    await this.memories.insertOne({ ...doc, tenantId: p.tenantId, purgeAt: new Date(doc.expiresAtMs + PURGE_GRACE_MS) });
+    await this.memories.insertOne({ ...doc, tenantId: p.tenantId, purgeAt: purgeAtFor(doc.expiresAtMs) });
   }
 
   async getById(p: Principal, id: string): Promise<Memory | null> {
@@ -106,7 +112,7 @@ export class MongoMemoryRepo implements MemoryRepo {
         );
         if (res.matchedCount !== 1) throw new Error("SUPERSEDE_TARGET_NOT_FOUND");
         await this.memories.insertOne(
-          { ...newDoc, tenantId: p.tenantId, supersedes: oldId, purgeAt: new Date(newDoc.expiresAtMs + PURGE_GRACE_MS) },
+          { ...newDoc, tenantId: p.tenantId, supersedes: oldId, purgeAt: purgeAtFor(newDoc.expiresAtMs) },
           { session },
         );
       });

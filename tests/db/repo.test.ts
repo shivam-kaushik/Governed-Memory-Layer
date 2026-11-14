@@ -47,12 +47,20 @@ describe("A2 MongoMemoryRepo", () => {
     expect(plan).toContain("IXSCAN");
     expect(plan).toContain("derivedFrom_1");
   });
-  it("insert_sets_purgeAt", async () => {
-    const m = makeMemory({ expiresAtMs: 5_000_000 });
+  it("insert_sets_purgeAt_after_expiry_plus_grace", async () => {
+    const far = new Date().getTime() + 86_400_000;
+    const m = makeMemory({ expiresAtMs: far });
     await repo.insert(principalA, m);
     const raw = await t.db.collection("memories").findOne({ _id: m._id as any });
     expect(raw?.purgeAt).toBeInstanceOf(Date);
-    expect((raw!.purgeAt as Date).getTime()).toBe(5_000_000 + PURGE_GRACE_MS);
+    expect((raw!.purgeAt as Date).getTime()).toBe(far + PURGE_GRACE_MS);
+  });
+  it("purgeAt_never_in_the_past_even_with_small_logical_timestamps", async () => {
+    // A fake/logical clock with tiny timestamps must not let the real-time TTL sweeper delete live memories.
+    const m = makeMemory({ expiresAtMs: 5_000_000 });
+    await repo.insert(principalA, m);
+    const raw = await t.db.collection("memories").findOne({ _id: m._id as any });
+    expect((raw!.purgeAt as Date).getTime()).toBeGreaterThan(new Date().getTime());
   });
   it("setStatus_is_tenant_scoped", async () => {
     const m = makeMemory(); await repo.insert(principalA, m);
