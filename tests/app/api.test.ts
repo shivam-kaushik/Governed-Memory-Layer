@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TraceStore } from "../../src/contracts/contracts";
 import { A_RESP, A_REV, B_RESP, apiWorld } from "./helpers";
 
 const DAY = 86_400_000;
@@ -163,6 +164,7 @@ describe("api memories", () => {
 describe("api audit", () => {
   it("audit_lists_decisions_with_selected_and_rejected_reason_codes", async () => {
     const w = await apiWorld("expired_fix");
+    w.repo.setIndexLag(true); // stale index: the expired doc reaches the authoritative recheck
     await w.call("POST", "/api/live/run", A_RESP, { alertId: w.scenario.alert.id });
     const ev = json(await w.call("GET", "/api/audit", A_RESP)).events as J[];
     const recall = ev.find((e) => e.op === "recall")!;
@@ -293,5 +295,50 @@ describe("api proof and routing", () => {
     const r = await w.raw({ method: "GET", path: "/api/memories", headers: { cookie: `theme=dark; session=${A_RESP}` } });
     expect(r.status).toBe(200);
     expect(json(r).memories).toHaveLength(1);
+  });
+});
+
+describe("api defense in depth (stores that leak)", () => {
+  it("purpose_in_body_cannot_change_the_purpose_used_by_correct_and_forget", async () => {
+    const w = await apiWorld();
+    const id = w.scenario.memoriesToSeed[0]!._id;
+    const r = await w.call("POST", "/api/memories/forget", A_REV, { id, reason: "x", purpose: "marketing" });
+    expect(r.status).toBe(200);
+    expect(w.audit.events.filter((e) => e.op === "forget").every((e) => e.purpose === "incident-triage")).toBe(true);
+  });
+
+  it("memories_filter_drops_rows_a_leaky_store_returns_from_other_tenants_and_scopes", async () => {
+    const w = await apiWorld("other_tenant");
+    const everything = async () => [...(await w.repo.listMemories(w.scenario.principals.teamBResponder, ["team:tenant-b"]))];
+    const leaky = await apiWorld("other_tenant", 1, { reads: { listMemories: everything, listAudit: async () => [] } });
+    expect(json(await leaky.call("GET", "/api/memories", A_RESP)).memories).toEqual([]);
+  });
+
+  it("audit_filter_drops_rows_a_leaky_store_returns_from_other_tenants", async () => {
+    const w = await apiWorld();
+    await w.call("POST", "/api/live/run", A_RESP, { alertId: w.scenario.alert.id });
+    const all = async () => [...w.audit.events];
+    const bRev = { id: "b-rev", tenantId: "tenant-b", role: "reviewer", scopes: ["team:tenant-b", "private:b-rev"], purposes: ["incident-triage"] };
+    const leaky = { ...w.ctx, resolver: async () => bRev, reads: { ...w.ctx.reads, listAudit: all } }; // reviewer: no own-rows filter masks the tenant filter
+    const { createApi } = await import("../../src/app/api");
+    const r = await createApi(leaky)({ method: "GET", path: "/api/audit", headers: { authorization: "Bearer any" } });
+    expect(json(r).events).toEqual([]);
+  });
+
+  it("trace_filter_drops_events_a_leaky_store_returns_from_other_tenants", async () => {
+    const w = await apiWorld();
+    const run = json(await w.call("POST", "/api/live/run", A_RESP, { alertId: w.scenario.alert.id }));
+    const all = await w.trace.listByTrace(w.scenario.actor, run.traceId);
+    const leaky = { ...w.ctx, trace: Object.create(w.trace, { listByTrace: { value: async () => all } }) as TraceStore };
+    const { createApi } = await import("../../src/app/api");
+    const r = await createApi(leaky)({ method: "GET", path: `/api/traces/${run.traceId}`, headers: { authorization: `Bearer ${B_RESP}` } });
+    expect(r.status).toBe(404);
+  });
+
+  it("principal_without_the_dashboard_purpose_sees_no_memories", async () => {
+    const w = await apiWorld();
+    const odd = { ...w.scenario.actor, purposes: ["marketing"] };
+    const r = await apiWorld("valid_fix", 1, { resolver: async () => odd });
+    expect(json(await r.call("GET", "/api/memories", "anything")).memories).toEqual([]);
   });
 });
